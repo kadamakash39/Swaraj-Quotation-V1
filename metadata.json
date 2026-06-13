@@ -1,0 +1,6 @@
+{
+  "name": "Furniture Quotation Management Portal",
+  "description": "Complete cloud-based ERP quotation system for Swaraj Enterprises with AI-powered estimation, automatic GST calculations, dynamic custom groupings, and professional ready-to-print A4 PDF engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

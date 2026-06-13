@@ -1,0 +1,161 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Print Specific Rules to guarantee crisp A4 preview pages and absolute scaling without truncation */
+@media print {
+  /* Remove default headers and footers that browsers add by defining A4 dimensions and precise margin */
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm 12mm 15mm;
+  }
+
+  /* Reset layout boxes and scroll properties to standard document block flow */
+  html, body, #root {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Force standard block rendering on flex/grid parent page wrappers so they stretch and segment across pages naturally */
+  div.min-h-screen, 
+  div.flex-1,
+  div.flex,
+  main,
+  aside,
+  .no-print {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  /* Hide everything not related to the A4 print canvas */
+  .no-print,
+  aside,
+  button,
+  .top-action-commands,
+  dialog,
+  iframe {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
+
+  /* Target other wrapper elements containing A4Preview on screen */
+  .lg\:col-span-3, 
+  .lg\:grid-cols-4,
+  .grid-cols-1,
+  .grid {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Adjust the active printed container to cover 100% width cleanly */
+  #swraj-a4-pdf-canvas {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* Clean up tables, images, and text scaling in prints */
+  table {
+    page-break-inside: auto;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: auto;
+  }
+  
+  thead {
+    display: table-header-group !important; /* duplicate header on each page break */
+  }
+  
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  /* Prevent page cutoff within specific key blocks */
+  .print-avoid-break,
+  .signature-block,
+  tr,
+  img {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Force background graphic colors and borders to print properly */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    content-visibility: visible !important;
+  }
+
+  /* Limit printed image heights for high-density, professional A4 sheets */
+  #swraj-a4-pdf-canvas img {
+    max-height: 80px !important;
+    width: auto !important;
+    object-fit: contain !important;
+    margin: 0 auto !important;
+    padding: 2px !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-page-break {
+    page-break-after: always;
+    break-after: always;
+  }
+}
+
+/* Custom premium scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
