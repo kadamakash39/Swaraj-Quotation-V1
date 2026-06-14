@@ -325,11 +325,24 @@ export default function A4Preview({
     });
   }
 
-  // Dynamically calculate row heights in mm
+  // Dynamically calculate row heights in mm based on description contents width to guarantee no browser overflow
   const getRowHeight = (row: LayoutRow) => {
-    if (row.type === 'section-header') return 12;
-    if (row.type === 'section-subtotal') return 12;
-    if (row.item && row.item.image && hasAnyImages) return 48; // taller row for 8x larger images (112px tall)
+    if (row.type === 'section-header') return 14;
+    if (row.type === 'section-subtotal') return 14;
+    if (row.item) {
+      const charCount = (row.item.description || '').length;
+      // Estimate lines inside the newly expanded 30% width description column
+      const lines = Math.max(1, Math.ceil(charCount / 35));
+      const textHeight = lines * 5 + 10; // 5mm per line + 10mm base padding
+      if (hasAnyImages) {
+        // If it has an image and this item has an image, it's at least 42mm (112px image + padding)
+        const hasImg = !!row.item.image;
+        if (hasImg) {
+          return Math.max(42, textHeight);
+        }
+      }
+      return Math.max(18, textHeight);
+    }
     return 18;
   };
 
@@ -349,7 +362,7 @@ export default function A4Preview({
     // Single page budget parameters (in mm):
     // Margin (24) + Header (36) + Bill To (42) + Table Header (10) + Totals Block (125) + Footer stripe (12) = 249mm
     // Available for rows: 297 - 249 = 48mm.
-    if (totalRowHeight <= 50) {
+    if (totalRowHeight <= 48) {
       return [{
         rows: flatRows,
         showBillTo: true,
@@ -357,10 +370,9 @@ export default function A4Preview({
       }];
     }
 
-    // Programmatical page by page split
-    // Page 1 Overhead: Header (36) + Bill To (42) + Table Header (10) + Footer stripe (12) = 110mm.
-    // Printable area for rows: 273 - 110 = 163mm. Let's budget 150mm.
-    const page1RowBudget = 150;
+    // Programmatical page by page split with safe layout buffers against physical overflows
+    // Page 1 Overheads budget: 110mm. Printable row area: ~163mm. Budget 115mm (leaves 48mm safety buffer)
+    const page1RowBudget = 115;
     let currentRows: LayoutRow[] = [];
     let currentHeight = 0;
 
@@ -388,8 +400,8 @@ export default function A4Preview({
       const remainingRows = flatRows.slice(i);
       const remainingHeight = remainingRows.reduce((sum, r) => sum + getRowHeight(r), 0);
       
-      // Page budget for rows on final page showing subtotals/calculations: 273 - Header (36) - Table Header (10) - Totals Block (125) - Footer (12) = 90mm. Let's budget 85mm.
-      const finalPageRowBudget = 85;
+      // Page budget for rows on final page showing subtotals/calculations: 273 - Header (36) - Table Header (10) - Totals Block (125) - Footer (12) = 90mm. Budget 60mm (leaves 30mm safety buffer)
+      const finalPageRowBudget = 60;
       
       if (remainingHeight <= finalPageRowBudget) {
         pages.push({
@@ -401,9 +413,8 @@ export default function A4Preview({
         break;
       }
       
-      // Middle Page: Header (36) + Table Header (10) + Footer stripe (12) = 58mm.
-      // Available area for rows on middle page: 273 - 58 = 215mm. Let's budget 190mm.
-      const middlePageRowBudget = 190;
+      // Middle Page available row area: ~217mm. Budget 140mm (leaves 77mm safety buffer)
+      const middlePageRowBudget = 140;
       while (i < flatRows.length) {
         const row = flatRows[i];
         const h = getRowHeight(row);
@@ -441,6 +452,58 @@ export default function A4Preview({
   };
 
   const pages = getPages();
+
+  // Download quotation page-by-page in high-resolution JPG format
+  const handleDownloadJPG = async () => {
+    let imagesToUse = flatPageImages;
+
+    // Safe fallback if pre-render isn't populated or was interrupted 
+    if (imagesToUse.length === 0) {
+      const pageElements = document.querySelectorAll('.a4-page-print-source');
+      if (!pageElements || pageElements.length === 0) {
+        alert("No layout pages found to capture.");
+        return;
+      }
+      
+      const captured: string[] = [];
+      for (let i = 0; i < pageElements.length; i++) {
+        const pageEl = pageElements[i] as HTMLElement;
+        try {
+          const canvas = await html2canvas(pageEl, {
+            scale: 2.2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            scrollX: 0,
+            scrollY: 0
+          });
+          captured.push(canvas.toDataURL('image/jpeg', 0.98));
+        } catch (err) {
+          console.error("Manual JPEG capture failed for page:", i, err);
+        }
+      }
+      imagesToUse = captured;
+      setFlatPageImages(captured);
+    }
+
+    if (imagesToUse.length === 0) {
+      alert("Failed to generate quotation page images.");
+      return;
+    }
+
+    // Trigger individual downloads in series with a tiny stagger to prevent pop-up blocker issues
+    imagesToUse.forEach((imgSrc, index) => {
+      setTimeout(() => {
+        const link = document.createElement('a');
+        link.href = imgSrc;
+        link.download = `Quotation_${quotation.id}_Page_${index + 1}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, index * 250); // 250ms stagger
+    });
+  };
 
   return (
     <div className={`space-y-6 flex flex-col min-h-screen ${flatPageImages.length > 0 ? 'has-flat-images' : ''}`}>
@@ -604,6 +667,14 @@ export default function A4Preview({
           </button>
 
           <button
+            onClick={handleDownloadJPG}
+            className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download JPG (All)
+          </button>
+
+          <button
             onClick={() => handleOpenShare('WhatsApp')}
             className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer"
           >
@@ -639,12 +710,14 @@ export default function A4Preview({
                   
                   {/* Dynamic Repeating Company Header (No borders as requested) */}
                   <div className="flex justify-between items-start pb-4 border-b border-slate-200 text-left">
-                    <div className="flex items-start gap-4">
+                     <div className="flex items-start gap-4">
                       {companyProfile.logo ? (
                         <img 
                           src={sanitizeSvgSrc(companyProfile.logo)} 
                           alt="Logo" 
                           className="w-16 h-16 object-contain rounded border border-slate-100 bg-white" 
+                          crossOrigin="anonymous"
+                          referrerPolicy="no-referrer"
                         />
                       ) : (
                         <div className="w-16 h-16 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-xs rounded border border-dashed border-slate-200 uppercase">
@@ -700,17 +773,17 @@ export default function A4Preview({
                           {/* Column Headers */}
                           <tr className="bg-[#1E3A8A] text-white border-b border-[#cbd5e1]">
                             <th className="p-2 w-[5%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Sr No</th>
-                            <th className={`p-2 ${hasAnyImages ? 'w-[22%]' : 'w-[44%]'} text-left border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]`}>Item Description</th>
+                            <th className={`p-2 ${hasAnyImages ? 'w-[30%]' : 'w-[42%]'} text-left border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]`}>Item Description</th>
                             {hasAnyImages && (
-                              <th className="p-2 w-[22%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Item Image</th>
+                              <th className="p-2 w-[12%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Item Image</th>
                             )}
                             <th className="p-2 w-[6%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Qty</th>
                             <th className="p-2 w-[6%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Unit</th>
-                            <th className="p-2 w-[11%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Rate</th>
-                            <th className="p-2 w-[6%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc %</th>
-                            <th className="p-2 w-[10%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc. Amt</th>
-                            <th className="p-2 w-[11%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Net Rate</th>
-                            <th className="p-2 w-[12%] text-right font-bold uppercase tracking-tight text-[9.5px]">Amount</th>
+                            <th className="p-2 w-[10%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Rate</th>
+                            <th className="p-2 w-[5%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc %</th>
+                            <th className="p-2 w-[8%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc. Amt</th>
+                            <th className="p-2 w-[8%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Net Rate</th>
+                            <th className="p-2 w-[10%] text-right font-bold uppercase tracking-tight text-[9.5px]">Amount</th>
                           </tr>
                         </thead>
                         <tbody className="font-medium text-slate-750">
@@ -766,7 +839,9 @@ export default function A4Preview({
                                       <img 
                                         src={sanitizeSvgSrc(item.image)} 
                                         alt={item.description} 
-                                        className="h-28 w-28 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm" 
+                                        className="h-28 w-28 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm"
+                                        crossOrigin="anonymous"
+                                        referrerPolicy="no-referrer"
                                       />
                                     ) : (
                                       <span className="text-slate-350 text-[9px] font-bold block uppercase tracking-tighter">No Pic</span>
@@ -1061,6 +1136,72 @@ export default function A4Preview({
             ) : (
               <p className="text-[10px] text-slate-400 italic">Waiting for viewport calculation...</p>
             )}
+          </div>
+
+          {/* Individual Page-by-Page JPG Exporter */}
+          <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 space-y-3 text-left">
+            <div className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-600" />
+              <span className="font-extrabold text-indigo-950 text-xs tracking-tight">Page-by-Page JPG Exporter</span>
+            </div>
+            
+            <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+              Download individual locked layout sheets as crisp, un-editable high-resolution JPEG images.
+            </p>
+
+            <div className="space-y-1.5 pt-1">
+              {pages.map((_, idx) => {
+                const hasImgAvailable = flatPageImages[idx];
+                return (
+                  <button
+                    key={idx}
+                    onClick={async () => {
+                      let imgSrc = hasImgAvailable;
+                      if (!imgSrc) {
+                        // Dynamically compute on-demand if not pre-rendered
+                        const pageElements = document.querySelectorAll('.a4-page-print-source');
+                        const pageEl = pageElements[idx] as HTMLElement;
+                        if (pageEl) {
+                          try {
+                            const canvas = await html2canvas(pageEl, {
+                              scale: 2.2,
+                              useCORS: true,
+                              allowTaint: false,
+                              backgroundColor: '#ffffff',
+                              logging: false,
+                              scrollX: 0,
+                              scrollY: 0
+                            });
+                            imgSrc = canvas.toDataURL('image/jpeg', 0.98);
+                            // Update our state cache for index
+                            const copy = [...flatPageImages];
+                            copy[idx] = imgSrc;
+                            setFlatPageImages(copy);
+                          } catch (e) {
+                            alert("Failed to render page image.");
+                            return;
+                          }
+                        }
+                      }
+                      if (imgSrc) {
+                        const link = document.createElement('a');
+                        link.href = imgSrc;
+                        link.download = `Quotation_${quotation.id}_Page_${idx + 1}.jpg`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-350 text-slate-700 hover:text-slate-900 px-3 py-2 rounded-lg text-[11px] font-bold shadow-3xs cursor-pointer transition-all"
+                  >
+                    <span>Page {idx + 1} Image Block</span>
+                    <span className="text-indigo-600 font-bold hover:underline flex items-center gap-1 text-[10px]">
+                      Download JPG
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
