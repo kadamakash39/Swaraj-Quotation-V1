@@ -128,17 +128,18 @@ export default function A4Preview({
     setIsDownloadingPdf(true);
 
     const opt = {
-      margin: [10, 10, 10, 10], // 10mm margins for a beautiful, spacious and balanced A4 output
+      margin: 0,
       filename: `Quotation_${quotation.id}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
-        scale: 2.2, // Generates ultra crisp high density images and scaling text
+        scale: 2.0, // Generates ultra crisp high density images and scaling text
         useCORS: true, 
         logging: false,
-        allowTaint: true,
+        allowTaint: false, // Prevent security exception with untrusted canvas tainting
         backgroundColor: '#ffffff'
       },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'], after: '.a4-page-print' }
     };
 
     const runHtml2Pdf = (html2pdfLib: any) => {
@@ -208,19 +209,177 @@ export default function A4Preview({
 
   const itemsCount = quotation.items.length;
 
-  return (
-    <div className="space-y-6">
+  // Build the flat list of layout rows (sections, items, subtotals)
+  const uniqueGroups = Array.from(new Set(quotation.items.map(item => (item.groupName || '').trim()).filter(Boolean)));
+  const isGroupWise = uniqueGroups.length > 0;
+  const hasAnyImages = quotation.items.some(item => item.image && item.image.trim().length > 0);
+
+  interface LayoutRow {
+    type: 'section-header' | 'item' | 'section-subtotal';
+    name?: string;
+    item?: any;
+    idx?: number;
+    items?: any[];
+  }
+
+  const flatRows: LayoutRow[] = [];
+  if (isGroupWise) {
+    const ungroupedItems = quotation.items.filter(item => !(item.groupName || '').trim());
+    if (ungroupedItems.length > 0) {
+      flatRows.push({ type: 'section-header', name: 'General Items' });
+      ungroupedItems.forEach(item => {
+        const idx = quotation.items.findIndex(qi => qi.id === item.id);
+        flatRows.push({ type: 'item', item, idx });
+      });
+      flatRows.push({ type: 'section-subtotal', name: 'General Items', items: ungroupedItems });
+    }
+    uniqueGroups.forEach(gName => {
+      const gItems = quotation.items.filter(item => (item.groupName || '').trim() === gName);
+      flatRows.push({ type: 'section-header', name: gName });
+      gItems.forEach(item => {
+        const idx = quotation.items.findIndex(qi => qi.id === item.id);
+        flatRows.push({ type: 'item', item, idx });
+      });
+      flatRows.push({ type: 'section-subtotal', name: gName, items: gItems });
+    });
+  } else {
+    quotation.items.forEach((item, idx) => {
+      flatRows.push({ type: 'item', item, idx });
+    });
+  }
+
+  // Calculate row heights in mm
+  const getRowHeight = (row: LayoutRow) => {
+    if (row.type === 'section-header') return 8;
+    if (row.type === 'section-subtotal') return 10;
+    if (row.item && row.item.image && hasAnyImages) return 30; // compact image row
+    return 13; // item with no image
+  };
+
+  interface PageData {
+    rows: LayoutRow[];
+    showBillTo: boolean;
+    showTotals: boolean;
+  }
+
+  const getPages = (): PageData[] => {
+    const pages: PageData[] = [];
+    let currentRows: LayoutRow[] = [];
+    let currentHeight = 0;
+    
+    const totalRowHeight = flatRows.reduce((sum, r) => sum + getRowHeight(r), 0);
+    // Overhead on single-page document = Top margin (12) + Header (32) + Bill To (35) + Table Header (9) + Totals block (130) + Bottom stripe (8) + Page indicator (4) = 230mm
+    // Inside 297mm height, available rows space = 297 - 230 = 67mm.
+    const singlePageRowBudget = 67;
+
+    if (totalRowHeight <= singlePageRowBudget) {
+      pages.push({
+        rows: flatRows,
+        showBillTo: true,
+        showTotals: true
+      });
+      return pages;
+    }
+
+    // Otherwise we need multiple pages
+    let i = 0;
+    
+    // Page 1 Setup
+    // Page 1 Overhead: Margins (24) + Header (32) + Bill To (35) + Table Header (9) + Bottom stripe (8) + Page indicator (4) = 112mm
+    // Available row budget space = 297 - 112 = 185mm. Let's use 175mm to be safe and spacious
+    const page1RowBudget = 175;
+    while (i < flatRows.length) {
+      const row = flatRows[i];
+      const h = getRowHeight(row);
+      if (currentHeight + h > page1RowBudget) {
+        break;
+      }
+      currentRows.push(row);
+      currentHeight += h;
+      i++;
+    }
+    pages.push({
+      rows: currentRows,
+      showBillTo: true,
+      showTotals: false
+    });
+
+    // Pages 2+
+    while (i < flatRows.length) {
+      currentRows = [];
+      currentHeight = 0;
       
-      {/* Scope print inline overrides to force full background print graphics and clean sizing */}
+      const remainingRows = flatRows.slice(i);
+      const remainingRowsHeight = remainingRows.reduce((sum, r) => sum + getRowHeight(r), 0);
+      
+      // Final page Overhead: Margins (24) + Header (32) + Table Header (9) + Totals block (130) + Bottom stripe (8) + Page indicator (4) = 207mm
+      // Space for rows on Final Page = 297 - 207 = 90mm. Let's use 80mm to be safe
+      const finalPageRowBudget = 80;
+      
+      if (remainingRowsHeight <= finalPageRowBudget) {
+        pages.push({
+          rows: remainingRows,
+          showBillTo: false,
+          showTotals: true
+        });
+        i = flatRows.length;
+        break;
+      }
+      
+      // Middle Page (Header + Table Header)
+      // Overhead = Margins (24) + Header (32) + Table Header (9) + Bottom stripe (8) + Page indicator (4) = 77mm
+      // Space for rows on Middle Page = 297 - 77 = 220mm. Let's use 210mm to be safe
+      const middlePageRowBudget = 210;
+      while (i < flatRows.length) {
+        const row = flatRows[i];
+        const h = getRowHeight(row);
+        if (currentHeight + h > middlePageRowBudget) {
+          break;
+        }
+        currentRows.push(row);
+        currentHeight += h;
+        i++;
+      }
+      
+      if (currentRows.length === 0 && i < flatRows.length) {
+        currentRows.push(flatRows[i]);
+        i++;
+      }
+      
+      pages.push({
+        rows: currentRows,
+        showBillTo: false,
+        showTotals: false
+      });
+    }
+
+    // End safety: If the last page does not contain totals, append a clean Signatures page
+    if (pages.length > 0 && !pages[pages.length - 1].showTotals) {
+      pages.push({
+        rows: [],
+        showBillTo: false,
+        showTotals: true
+      });
+    }
+
+    return pages;
+  };
+
+  const pages = getPages();
+
+  return (
+    <div className="space-y-6 flex flex-col min-h-screen">
+      
+      {/* Scope print inline overrides to force full background print graphics and clean page-by-page sizing */}
       <style>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 12mm 15mm 12mm 15mm;
+            margin: 0mm !important;
           }
-          body {
+          body, #root {
             background: #ffffff !important;
-            color: #000000 !important;
+            color: #000055 !important;
           }
           .no-print {
             display: none !important;
@@ -232,14 +391,39 @@ export default function A4Preview({
             margin: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
-            min-height: auto !important;
             background: transparent !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
           }
-          .no-print-background {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+        }
+        
+        /* Direct page box mirroring strict physical A4 standards */
+        .a4-page-print {
+          width: 210mm;
+          height: 297mm;
+          min-height: 297mm;
+          max-height: 297mm;
+          padding: 12mm 15mm;
+          margin: 0 auto;
+          box-sizing: border-box;
+          background: #ffffff;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          overflow: hidden;
+          color: #1e293b;
+        }
+
+        @media print {
+          .a4-page-print {
+            page-break-after: always !important;
+            break-after: always !important;
+            border: none !important;
+            box-shadow: none !important;
+            margin: 0 auto !important;
+          }
+          .a4-page-print:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       `}</style>
@@ -301,148 +485,155 @@ export default function A4Preview({
       </div>
 
       {/* Main split preview: Screen simulation representation */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start flex-grow">
         
         {/* Printable Document Sheet LHS (A4 standard preview pages) */}
-        <div className="lg:col-span-3 space-y-6 select-text overflow-x-auto">
+        <div className="lg:col-span-3 space-y-6 select-text overflow-x-auto bg-slate-100 p-8 rounded-2xl">
           
-          {/* Printable Page Frame (A4 simulation) */}
-          <div 
-            id="swraj-a4-pdf-canvas"
-            className="w-full min-w-[760px] max-w-[850px] mx-auto bg-white border border-slate-200 p-10 font-sans shadow-lg text-slate-800 tracking-tight"
-            style={{ minHeight: '1120px' }}
-          >
-            {/* Custom high-visibility item layout table containing the repeating sections in the thead */}
-            <div className="py-4">
-              <table className="w-full text-left text-[11px] border-collapse font-sans shadow-2xs">
-                <thead>
-                  {/* Page Header Row - Repeats automatically on multi-page print */}
-                  <tr className="border-none">
-                    <td colSpan={10} className="p-0 border-none bg-white">
-                      <div className="flex justify-between items-start pb-5 text-left">
-                        <div className="flex items-start gap-3.5">
-                          {companyProfile.logo ? (
-                            <img 
-                              src={companyProfile.logo} 
-                              alt="Logo" 
-                              className="w-16 h-16 object-contain rounded border border-slate-100" 
-                            />
-                          ) : (
-                            <div className="w-16 h-16 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-xs rounded border border-dashed border-slate-200 uppercase">
-                              Logo
-                            </div>
-                          )}
-                          <div>
-                            <h1 className="text-lg font-extrabold tracking-tight text-slate-900 leading-tight mb-1">{companyProfile.name}</h1>
-                            <p className="text-[10px] text-slate-550 max-w-[320px] leading-relaxed">{companyProfile.address}</p>
-                            <p className="text-[10px] text-slate-550 font-medium">Email: {companyProfile.email}</p>
-                            <p className="text-[10px] text-slate-550 font-medium">Mobile: {companyProfile.mobile}</p>
-                          </div>
+          <div id="swraj-a4-pdf-canvas" className="space-y-6 p-1 bg-slate-100 print:bg-white print:p-0">
+            {pages.map((page, pageIdx) => (
+              <div 
+                key={pageIdx}
+                className="a4-page-print border border-slate-200 shadow-xl print:shadow-none print:border-none"
+              >
+                {/* Content block: aligned to top layout */}
+                <div className="space-y-2 flex-grow">
+                  
+                  {/* Dynamic Repeating Company Header (No borders as requested) */}
+                  <div className="flex justify-between items-start pb-4 text-left">
+                    <div className="flex items-start gap-4">
+                      {companyProfile.logo ? (
+                        <img 
+                          src={companyProfile.logo} 
+                          alt="Logo" 
+                          className="w-16 h-16 object-contain rounded border border-slate-100 bg-white" 
+                        />
+                      ) : (
+                        <div className="w-16 h-16 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-xs rounded border border-dashed border-slate-200 uppercase">
+                          Logo
                         </div>
+                      )}
+                      <div>
+                        <h1 className="text-lg font-extrabold tracking-tight text-slate-900 leading-tight mb-1">{companyProfile.name}</h1>
+                        <p className="text-[10px] text-slate-500 max-w-[320px] leading-relaxed font-semibold">{companyProfile.address}</p>
+                        <p className="text-[10px] text-slate-500 font-bold">Email: {companyProfile.email} | Mobile: {companyProfile.mobile}</p>
+                      </div>
+                    </div>
 
-                        <div className="text-right">
-                          <h2 className="text-2xl font-black text-[#1E40AF] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
+                    <div className="text-right">
+                      <h2 className="text-2xl font-black text-[#1E40AF] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
+                    </div>
+                  </div>
+
+                  {/* Billing Parties & Metadata grid (No borders as requested) - Only on Page 1 */}
+                  {page.showBillTo && (
+                    <div className="grid grid-cols-2 gap-4 py-3 text-[11px] leading-normal font-sans">
+                      <div className="space-y-0.5 text-left">
+                        <p className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Bill To:</p>
+                        <p className="font-extrabold text-slate-900 text-xs tracking-tight">{matchedCustomer?.name || '[Client Name]'}</p>
+                        {matchedCustomer?.companyName && (
+                          <p className="font-bold text-slate-700 leading-none">{matchedCustomer.companyName}</p>
+                        )}
+                        <p className="text-slate-600 max-w-[280px] leading-snug">{matchedCustomer?.address || '[Client Address]'}</p>
+                        {matchedCustomer?.city && (
+                          <p className="text-slate-600 font-medium">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
+                        )}
+                        <p className="text-slate-500 font-semibold mt-1">
+                          GST: {matchedCustomer?.gstin || '[Client GST]'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end items-end pb-1.5 text-right font-sans">
+                        <div className="space-y-1 text-slate-800 text-[11px] font-medium leading-tight">
+                          <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Quotation No:</span> <span className="font-mono font-extrabold text-slate-950 text-xs">{quotation.id}</span></p>
+                          <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Date:</span> <span className="font-mono">{quotation.date}</span></p>
+                          <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Validity:</span> <span className="font-mono text-slate-700">{quotation.validityDate}</span></p>
+                          <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Prepared By:</span> <span className="font-bold text-[#1E3A8A] uppercase tracking-wide">{quotation.createdBy || 'Admin'}</span></p>
                         </div>
                       </div>
-                    </td>
-                  </tr>
+                    </div>
+                  )}
 
-                  {/* Billing Parties and metadata structure Row - Repeats automatically on multi-page print */}
-                  <tr className="border-none">
-                    <td colSpan={10} className="p-0 border-none bg-white">
-                      <div className="grid grid-cols-2 gap-4 py-5 text-[11px] leading-normal font-sans">
-                        <div className="space-y-0.5 text-left">
-                          <p className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Bill To:</p>
-                          <p className="font-extrabold text-slate-900 text-xs tracking-tight">{matchedCustomer?.name || '[Client Name]'}</p>
-                          {matchedCustomer?.companyName && (
-                            <p className="font-bold text-slate-700 leading-none">{matchedCustomer.companyName}</p>
-                          )}
-                          <p className="text-slate-600 max-w-[280px] leading-snug">{matchedCustomer?.address || '[Client Address]'}</p>
-                          {matchedCustomer?.city && (
-                            <p className="text-slate-600 font-medium">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
-                          )}
-                          <p className="text-slate-500 font-semibold mt-1">
-                            GST: {matchedCustomer?.gstin || '[Client GST]'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
-                          </p>
-                        </div>
-
-                        <div className="flex justify-end items-end pb-1.5 text-right font-sans">
-                          <div className="space-y-1 text-slate-800 text-[11px] font-medium leading-tight">
-                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Quotation No:</span> <span className="font-mono font-extrabold text-slate-950 text-xs">{quotation.id}</span></p>
-                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Date:</span> <span className="font-mono">{quotation.date}</span></p>
-                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Validity:</span> <span className="font-mono text-slate-700">{quotation.validityDate}</span></p>
-                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Prepared By:</span> <span className="font-bold text-[#1E3A8A] uppercase tracking-wide">{quotation.createdBy || 'Admin'}</span></p>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Item Columns Row */}
-                  <tr className="bg-[#1E3A8A] text-white border-y border-slate-300">
-                    <th className="p-1.5 w-[5%] text-center border-l border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
-                    <th className="p-1.5 w-[25%] text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Description</th>
-                    <th className="p-1.5 w-[25%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Image</th>
-                    <th className="p-1.5 w-[8%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">HSN/SAC</th>
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Qty</th>
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Unit</th>
-                    <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Rate</th>
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc %</th>
-                    <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Net Rate</th>
-                    <th className="p-1.5 w-[8%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="font-medium text-slate-750">
-                  {(() => {
-                    const uniqueGroups = Array.from(new Set(quotation.items.map(item => (item.groupName || '').trim()).filter(Boolean)));
-                    const isGroupWise = uniqueGroups.length > 0;
-
-                    if (isGroupWise) {
-                      const ungroupedItems = quotation.items.filter(item => !(item.groupName || '').trim());
-                      interface RenderGroup {
-                        name: string;
-                        items: typeof quotation.items;
-                      }
-                      const renderGroups: RenderGroup[] = [];
-                      if (ungroupedItems.length > 0) {
-                        renderGroups.push({ name: 'General Items', items: ungroupedItems });
-                      }
-                      uniqueGroups.forEach(gName => {
-                        renderGroups.push({
-                           name: gName,
-                           items: quotation.items.filter(item => (item.groupName || '').trim() === gName)
-                        });
-                      });
-
-                      return renderGroups.map((group, groupIdx) => (
-                        <React.Fragment key={group.name}>
-                          {/* Group header row */}
-                          <tr className="bg-slate-50 border-y border-slate-350">
-                            <td colSpan={10} className="py-2 px-3 text-[#1E3A8A] uppercase font-black text-[9.5px] tracking-wide bg-[#1E3A8A]/5 text-left border-r border-l border-slate-300">
-                              📂 Section: {group.name}
-                            </td>
+                  {/* Dynamic Items Table */}
+                  {page.rows.length > 0 && (
+                    <div className="py-1">
+                      <table className="w-full text-left text-[11px] border-collapse font-sans shadow-2xs">
+                        <thead>
+                          {/* Column Headers replicated perfectly across pages */}
+                          <tr className="bg-[#1E3A8A] text-white border-y border-slate-300">
+                            <th className="p-1.5 w-[5%] text-center border-l border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
+                            <th className={`p-1.5 ${hasAnyImages ? 'w-[25%]' : 'w-[50%]'} text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]`}>Item Description</th>
+                            {hasAnyImages && (
+                              <th className="p-1.5 w-[25%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Image</th>
+                            )}
+                            <th className="p-1.5 w-[8%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">HSN/SAC</th>
+                            <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Qty</th>
+                            <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Unit</th>
+                            <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Rate</th>
+                            <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc %</th>
+                            <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Net Rate</th>
+                            <th className="p-1.5 w-[8%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Amount</th>
                           </tr>
-                          {group.items.map((item) => {
-                            const idx = quotation.items.findIndex(qi => qi.id === item.id);
+                        </thead>
+                        <tbody className="font-medium text-slate-750">
+                          {page.rows.map((row, rIdx) => {
+                            if (row.type === 'section-header') {
+                              return (
+                                <tr key={`sh-${rIdx}`} className="bg-slate-50 border-b border-slate-300">
+                                  <td colSpan={hasAnyImages ? 10 : 9} className="py-2 px-3 text-[#1E3A8A] uppercase font-black text-[9.5px] tracking-wide bg-[#1E3A8A]/5 text-left border-r border-l border-slate-300 animate-fade-in">
+                                    📂 Section: {row.name}
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            if (row.type === 'section-subtotal') {
+                              return (
+                                <tr key={`sst-${rIdx}`} className="bg-slate-100/40 border-b border-slate-300 font-bold text-[9px] no-print-background select-none">
+                                  <td colSpan={2} className="py-1.5 px-3 text-slate-600 uppercase text-right tracking-wider border-l border-r border-slate-300">
+                                    {row.name} Subtotal:
+                                  </td>
+                                  {hasAnyImages && <td className="p-1 border-r border-slate-300"></td>}
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 border-r border-slate-300"></td>
+                                  <td className="p-1 pr-2.5 text-right border-r border-slate-300 font-mono text-[#1E3A8A] font-black bg-slate-100/60 shadow-inner">
+                                    ₹{row.items?.reduce((sum, item) => {
+                                      const activeDisc = quotation.masterDiscountPercent;
+                                      const discountedRate = item.rate * (1 - activeDisc / 100);
+                                      return sum + (item.qty * discountedRate);
+                                    }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            const item = row.item;
+                            const idx = row.idx ?? 0;
                             const activeDisc = quotation.masterDiscountPercent;
                             const discountedRate = item.rate * (1 - activeDisc / 100);
                             const finalAmount = item.qty * discountedRate;
 
                             return (
-                              <tr key={item.id} className="align-middle border-b border-slate-200 hover:bg-slate-50/40">
+                              <tr key={`item-${item.id}-${rIdx}`} className="align-middle border-b border-slate-200 hover:bg-slate-50/40">
                                 <td className="p-1 text-center border-l border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
                                 <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-900 leading-snug">{item.description}</td>
-                                <td className="p-2 border-r border-slate-300 text-center">
-                                  {item.image ? (
-                                    <img 
-                                      src={item.image} 
-                                      alt={item.description} 
-                                      className="w-36 h-36 sm:w-40 sm:h-40 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-3xs" 
-                                    />
-                                  ) : (
-                                    <span className="text-slate-300 text-[9px] font-bold block uppercase tracking-tighter">No Pic</span>
-                                  )}
-                                </td>
+                                {hasAnyImages && (
+                                  <td className="p-1.5 border-r border-slate-300 text-center">
+                                    {item.image ? (
+                                      <img 
+                                        src={item.image} 
+                                        alt={item.description} 
+                                        className="h-10 max-h-12 w-auto object-contain bg-white p-0.5 mx-auto rounded border border-slate-200" 
+                                      />
+                                    ) : (
+                                      <span className="text-slate-300 text-[9px] font-bold block uppercase tracking-tighter">No Pic</span>
+                                    )}
+                                  </td>
+                                )}
                                 <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-650 font-bold">9403</td>
                                 <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-800 font-bold">{item.qty}</td>
                                 <td className="p-1 text-center border-r border-slate-300">
@@ -456,7 +647,7 @@ export default function A4Preview({
                                 <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-700">
                                   {activeDisc > 0 ? `${activeDisc}%` : '—'}
                                 </td>
-                                <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700 font-semibold">
+                                <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-705 font-semibold">
                                   ₹{discountedRate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                                 <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono font-bold text-slate-900">
@@ -465,308 +656,237 @@ export default function A4Preview({
                               </tr>
                             );
                           })}
-                          {/* Group Subtotal Row */}
-                          <tr className="bg-slate-100/40 border-b border-slate-350 font-bold text-[9px] no-print-background select-none">
-                            <td colSpan={2} className="py-2 px-3 text-slate-600 uppercase text-right tracking-wider border-l border-r border-slate-300">
-                              {group.name} Subtotal:
-                            </td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1 border-r border-slate-300"></td>
-                            <td className="p-1.5 pr-2.5 text-right border-r border-slate-300 font-mono text-[#1E3A8A] font-black bg-slate-100/60 shadow-inner">
-                              ₹{group.items.reduce((sum, item) => {
-                                const activeDisc = quotation.masterDiscountPercent;
-                                const discountedRate = item.rate * (1 - activeDisc / 100);
-                                return sum + (item.qty * discountedRate);
-                              }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                        </React.Fragment>
-                      ));
-                    }
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-                    // Otherwise show standard flat items
-                    return quotation.items.map((item, idx) => {
-                      const activeDisc = quotation.masterDiscountPercent;
-                      const discountedRate = item.rate * (1 - activeDisc / 100);
-                      const finalAmount = item.qty * discountedRate;
-
-                      return (
-                        <tr key={item.id} className="align-middle border-b border-slate-200 hover:bg-slate-50/40">
-                          {/* Continuous Sr No */}
-                          <td className="p-1 text-center border-l border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
-                          
-                          {/* Item Description */}
-                          <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-900 leading-snug">
-                            {item.description}
-                          </td>
-
-                          {/* Item Image representation */}
-                          <td className="p-2 border-r border-slate-300 text-center">
-                            {item.image ? (
-                              <img 
-                                src={item.image} 
-                                alt={item.description} 
-                                className="w-36 h-36 sm:w-40 sm:h-40 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-3xs" 
-                              />
-                            ) : (
-                              <span className="text-slate-300 text-[9px] font-bold block uppercase tracking-tighter">No Pic</span>
-                            )}
-                          </td>
-
-                          {/* HSN/SAC code */}
-                          <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-600 font-medium font-bold">9403</td>
-
-                          {/* Qty */}
-                          <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-800 font-bold">{item.qty}</td>
-
-                          {/* Custom grey rounded unit pill */}
-                          <td className="p-1 text-center border-r border-slate-300">
-                            <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-bold border border-slate-200 inline-block uppercase leading-none min-w-[38px] text-center shadow-3xs">
-                              {item.uom || 'Nos'}
-                            </span>
-                          </td>
-
-                          {/* Rate */}
-                          <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700">
-                            ₹{item.rate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-
-                          {/* Discount Percent */}
-                          <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-700">
-                            {activeDisc > 0 ? `${activeDisc}%` : '—'}
-                          </td>
-
-                          {/* Net Rate */}
-                          <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700 font-semibold">
-                            ₹{discountedRate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-
-                          {/* Gross Amount */}
-                          <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono font-bold text-slate-900">
-                            ₹{finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Total Grand Amount Chargeable in Words */}
-            <div className="border border-slate-300 bg-slate-50/40 rounded-lg px-3 py-1.5 mt-3 text-[10px] font-sans flex items-center gap-2 shadow-3xs flex-wrap">
-              <span className="font-extrabold text-slate-500 uppercase tracking-widest text-[8.5px] bg-slate-200/70 border border-slate-300 rounded px-1.5 py-0.5 leading-none select-none">
-                Amount in Words
-              </span>
-              <span className="font-black text-slate-800 capitalize font-mono text-[10.5px]">
-                Rupees {convertNumberToWords(grandTotal)} Only
-              </span>
-            </div>
-
-            {/* Under Table Breakdown layout exactly matching screenshot blueprint */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start mt-4 text-[11px] font-sans">
-              
-              {/* Left Side: Specs, bank transfer details, terms conditions */}
-              <div className="space-y-4">
-                
-                {/* Custom Material specification block */}
-                <div>
-                  <p className="font-extrabold text-slate-800 uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1">
-                    Material Specifications:
-                  </p>
-                  <div className="space-y-1 text-slate-650 font-medium leading-relaxed">
-                    {Array.isArray(quotation.materialSpecs) ? (
-                      quotation.materialSpecs.filter(s => s.checked).map((spec, index) => (
-                        <p key={spec.id} className="flex gap-1.5 items-start">
-                          <span className="font-bold text-slate-800 shrink-0">{(index + 1)}.</span>
-                          <span>{spec.text}</span>
-                        </p>
-                      ))
-                    ) : (
-                      <p className="text-slate-650 leading-relaxed font-medium">
-                        <span className="font-semibold text-slate-900">Plywood Core:</span> {(quotation.materialSpecs as any).plywood} |{' '}
-                        <span className="font-semibold text-slate-900">External:</span> {(quotation.materialSpecs as any).externalLaminate} |{' '}
-                        <span className="font-semibold text-slate-900">Internal Linker:</span> {(quotation.materialSpecs as any).internalLaminate} |{' '}
-                        <span className="font-semibold text-slate-900">Hardware:</span> {(quotation.materialSpecs as any).hardware}
-                        {(quotation.materialSpecs as any).laminateBrand && (
-                          <> | <span className="font-semibold text-slate-900">Laminates:</span> {(quotation.materialSpecs as any).laminateBrand}</>
-                        )}
-                      </p>
-                    )}
-                    {Array.isArray(quotation.materialSpecs) && quotation.materialSpecs.filter(s => s.checked).length === 0 && (
-                      <p className="text-slate-400 italic">No material specifications included.</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Terms and conditions */}
-                <div>
-                  <p className="font-extrabold text-slate-800 uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1">
-                    Terms & Conditions:
-                  </p>
-                  <div className="space-y-1 text-slate-650 font-medium leading-relaxed">
-                    {activeTerms.map((term, index) => (
-                      <p key={term.id} className="flex gap-1.5 items-start">
-                        <span className="font-bold text-slate-800 shrink-0">{(index + 1)}.</span>
-                        <span>{term.text}</span>
-                      </p>
-                    ))}
-                    {activeTerms.length === 0 && (
-                      <>
-                        <p className="flex gap-1.5 items-start">
-                          <span className="font-bold text-slate-800">1.</span>
-                          <span>Payment structure is subject to standard mutual 30 days contract terms.</span>
-                        </p>
-                        <p className="flex gap-1.5 items-start">
-                          <span className="font-bold text-slate-800">2.</span>
-                          <span>Goods and raw carcasses remain the property of the seller until cleared.</span>
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Right Side: Calculation metrics table and Signature Stamp bounding area */}
-              <div className="space-y-4">
-                
-                {/* Math layout aligned to extreme right */}
-                <div className="w-full max-w-[280px] ml-auto space-y-1 text-right text-slate-850 font-medium [content-visibility:auto]">
-                  <table className="w-full text-[11px] font-mono leading-tight">
-                    <tbody>
-                      <tr>
-                        <td className="text-left py-0.5 text-slate-500 font-sans font-semibold">Subtotal</td>
-                        <td className="font-bold text-right py-0.5">₹{grossSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      </tr>
-                      <tr>
-                        <td className="text-left py-0.5 text-slate-500 font-sans font-semibold font-medium">Discount</td>
-                        <td className="font-bold text-right py-0.5 text-slate-700">₹{totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      </tr>
-                      <tr className="border-[0.5px] border-slate-200-dashed border-x-0">
-                        <td className="text-left py-1 text-slate-800 font-sans font-extrabold uppercase text-[10px]">Taxable</td>
-                        <td className="font-extrabold text-right py-1 text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      </tr>
-
-                      {isLocal ? (
-                        <>
-                          <tr>
-                            <td className="text-left py-0.5 text-slate-500 font-sans font-medium">CGST 9%</td>
-                            <td className="font-bold text-right py-0.5 text-slate-700">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                          <tr>
-                            <td className="text-left py-0.5 text-slate-500 font-sans font-medium">SGST 9%</td>
-                            <td className="font-bold text-right py-0.5 text-slate-700">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                        </>
-                      ) : (
-                        <tr>
-                          <td className="text-left py-0.5 text-slate-500 font-sans font-medium font-semibold">IGST 18%</td>
-                          <td className="font-bold text-right py-0.5 text-slate-700">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        </tr>
-                      )}
-
-                      <tr className="border-t border-slate-350">
-                        <td className="text-left py-1.5 text-[#1E3A8A] font-sans font-extrabold uppercase text-xs tracking-tight">Grand Total</td>
-                        <td className="font-extrabold text-right py-1.5 text-xs text-[#1E3A8A]">₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Signature Block exactly matching spacing from PDF layout, with relative stamp overlay */}
-                <div className="border border-slate-300 rounded-xl p-3 max-w-[280px] ml-auto bg-slate-50/20 shadow-3xs flex flex-col items-center justify-between text-center space-y-2 h-[150px] overflow-hidden">
-                  <div className="text-[10px] font-extrabold text-slate-755 uppercase tracking-wide">
-                    For {companyProfile.name}
-                  </div>
-                  
-                  {/* Digital Wet Stamp & Signature Image positioned sequentially to completely prevent overlapping */}
-                  <div className="h-20 flex items-center justify-center w-full relative">
-                    {companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
-                      <img 
-                        src={companyProfile.stampAndSignature || companyProfile.stamp} 
-                        alt="Authorized Stamp & Seal" 
-                        className="max-h-20 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95 transition-opacity duration-300" 
-                      />
-                    ) : (
-                      <div className="text-[9px] text-slate-300 italic flex items-center justify-center h-full select-none">
-                        (Stamp & Signature Area)
+                  {/* Total Grand Amount Chargeable in Words & Specs Grid - Only on the Final Page */}
+                  {page.showTotals && (
+                    <div className="space-y-4">
+                      
+                      {/* Total Grand Amount Chargeable in Words */}
+                      <div className="border border-slate-300 bg-slate-50/40 rounded-lg px-3 py-1.5 mt-2 text-[10px] font-sans flex items-center gap-2 shadow-3xs flex-wrap">
+                        <span className="font-extrabold text-slate-550 uppercase tracking-widest text-[8.5px] bg-slate-200/70 border border-slate-300 rounded px-1.5 py-0.5 leading-none select-none">
+                          Amount in Words
+                        </span>
+                        <span className="font-black text-slate-800 capitalize font-mono text-[10.5px]">
+                          Rupees {convertNumberToWords(grandTotal)} Only
+                        </span>
                       </div>
-                    )}
+
+                      {/* Under Table Breakdown layout */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start mt-3 text-[11px] font-sans">
+                        
+                        {/* Left Side: Specs & terms conditions */}
+                        <div className="space-y-4">
+                          
+                          {/* Custom Material specification block */}
+                          <div>
+                            <p className="font-extrabold text-slate-800 uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1 font-bold">
+                              Material Specifications:
+                            </p>
+                            <div className="space-y-1 text-slate-650 font-semibold leading-relaxed text-[10.5px]">
+                              {Array.isArray(quotation.materialSpecs) ? (
+                                quotation.materialSpecs.filter(s => s.checked).map((spec, index) => (
+                                  <p key={spec.id} className="flex gap-1.5 items-start">
+                                    <span className="font-bold text-slate-800 shrink-0">{(index + 1)}.</span>
+                                    <span>{spec.text}</span>
+                                  </p>
+                                ))
+                              ) : (
+                                <p className="text-slate-650 leading-relaxed font-semibold">
+                                  <span className="font-semibold text-slate-950">Plywood Core:</span> {(quotation.materialSpecs as any).plywood} |{' '}
+                                  <span className="font-semibold text-slate-950">External:</span> {(quotation.materialSpecs as any).externalLaminate} |{' '}
+                                  <span className="font-semibold text-slate-950">Internal Linker:</span> {(quotation.materialSpecs as any).internalLaminate} |{' '}
+                                  <span className="font-semibold text-slate-950">Hardware:</span> {(quotation.materialSpecs as any).hardware}
+                                  {(quotation.materialSpecs as any).laminateBrand && (
+                                    <> | <span className="font-semibold text-slate-950">Laminates:</span> {(quotation.materialSpecs as any).laminateBrand}</>
+                                  )}
+                                </p>
+                              )}
+                              {Array.isArray(quotation.materialSpecs) && quotation.materialSpecs.filter(s => s.checked).length === 0 && (
+                                <p className="text-slate-400 italic">No material specifications included.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Terms and conditions */}
+                          <div>
+                            <p className="font-extrabold text-[#1E3A8A] uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1 font-bold">
+                              Terms & Conditions:
+                            </p>
+                            <div className="space-y-1 text-slate-650 font-semibold leading-relaxed text-[10.5px]">
+                              {activeTerms.map((term, index) => (
+                                <p key={term.id} className="flex gap-1.5 items-start">
+                                  <span className="font-bold text-slate-800 shrink-0">{(index + 1)}.</span>
+                                  <span>{term.text}</span>
+                                </p>
+                              ))}
+                              {activeTerms.length === 0 && (
+                                <>
+                                  <p className="flex gap-1.5 items-start">
+                                    <span className="font-bold text-slate-800">1.</span>
+                                    <span>Payment structure is subject to standard mutual 30 days contract terms.</span>
+                                  </p>
+                                  <p className="flex gap-1.5 items-start">
+                                    <span className="font-bold text-slate-800">2.</span>
+                                    <span>Goods and raw carcasses remain the property of the seller until cleared.</span>
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+
+                        {/* Right Side: Calculation metrics table, Signature block & Bank details */}
+                        <div className="space-y-4">
+                          
+                          {/* Math layout aligned to extreme right */}
+                          <div className="w-full max-w-[280px] ml-auto space-y-1 text-right text-slate-850 font-medium [content-visibility:auto]">
+                            <table className="w-full text-[11px] font-mono leading-tight">
+                              <tbody>
+                                <tr>
+                                  <td className="text-left py-0.5 text-slate-500 font-sans font-semibold">Subtotal</td>
+                                  <td className="font-bold text-right py-0.5">₹{grossSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr>
+                                  <td className="text-left py-0.5 text-slate-500 font-sans font-semibold font-medium">Discount</td>
+                                  <td className="font-bold text-right py-0.5 text-slate-750">₹{totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr className="border-[0.5px] border-slate-200 border-dashed border-x-0">
+                                  <td className="text-left py-1 text-slate-800 font-sans font-extrabold uppercase text-[10px]">Taxable Value</td>
+                                  <td className="font-extrabold text-right py-1 text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+
+                                {isLocal ? (
+                                  <>
+                                    <tr>
+                                      <td className="text-left py-0.5 text-slate-500 font-sans font-medium">CGST 9%</td>
+                                      <td className="font-bold text-right py-0.5 text-slate-700">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="text-left py-0.5 text-slate-500 font-sans font-medium">SGST 9%</td>
+                                      <td className="font-bold text-right py-0.5 text-slate-700">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    </tr>
+                                  </>
+                                ) : (
+                                  <tr>
+                                    <td className="text-left py-0.5 text-slate-500 font-sans font-semibold">IGST 18%</td>
+                                    <td className="font-bold text-right py-0.5 text-slate-700">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  </tr>
+                                )}
+
+                                <tr className="border-t border-slate-350">
+                                  <td className="text-left py-1.5 text-[#1E3A8A] font-sans font-extrabold uppercase text-xs tracking-tight">Grand Total</td>
+                                  <td className="font-extrabold text-right py-1.5 text-xs text-[#1E3A8A]">₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Signature Block with Relative Stamp overlay */}
+                          <div className="border border-slate-300 rounded-xl p-3 max-w-[280px] ml-auto bg-slate-50/20 shadow-3xs flex flex-col items-center justify-between text-center space-y-1 h-[135px] overflow-hidden">
+                            <div className="text-[10px] font-extrabold text-slate-700 uppercase tracking-wide">
+                              For {companyProfile.name}
+                            </div>
+                            
+                            <div className="h-16 flex items-center justify-center w-full relative">
+                              {companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
+                                <img 
+                                  src={companyProfile.stampAndSignature || companyProfile.stamp} 
+                                  alt="Authorized Stamp & Seal" 
+                                  className="max-h-16 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95 animate-fade-in" 
+                                />
+                              ) : (
+                                <div className="text-[9px] text-slate-300 italic flex items-center justify-center h-full select-none font-bold">
+                                  (Stamp & Signature Area)
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div className="w-full text-[9.5px] font-extrabold text-slate-900 uppercase tracking-wider border-t border-slate-200 pt-1">
+                              Authorised Signatory
+                            </div>
+                          </div>
+
+                          {/* Bank Details in sleek list layout */}
+                          {quotation.bankDetails.showInQuotation ? (
+                            <div className="border border-slate-200 rounded-xl p-3 max-w-[280px] ml-auto bg-slate-50/5 shadow-3xs text-left space-y-1 text-[10.5px]">
+                              <p className="font-extrabold text-[#1E3A8A] uppercase tracking-wider text-[8.5px] pb-1 border-b border-slate-200 font-sans font-bold">
+                                Bank Transfer Details:
+                              </p>
+                              <ul className="text-[10px] text-slate-650 font-semibold space-y-1 font-sans">
+                                <li className="flex items-start gap-1">
+                                  <span className="text-slate-400 select-none shrink-0">•</span>
+                                  <span><strong className="text-slate-755 font-extrabold">Account Name:</strong> {quotation.bankDetails.accountName || companyProfile.name}</span>
+                                </li>
+                                <li className="flex items-start gap-1">
+                                  <span className="text-slate-400 select-none shrink-0">•</span>
+                                  <span><strong className="text-slate-755 font-extrabold">Account No:</strong> <span className="font-mono text-slate-900 font-bold">{quotation.bankDetails.accountNo}</span></span>
+                                </li>
+                                <li className="flex items-start gap-1">
+                                  <span className="text-slate-400 select-none shrink-0">•</span>
+                                  <span><strong className="text-slate-755 font-extrabold">IFSC Code:</strong> <span className="font-mono text-slate-900 font-bold">{quotation.bankDetails.ifsc}</span></span>
+                                </li>
+                                <li className="flex items-start gap-1">
+                                  <span className="text-slate-400 select-none shrink-0">•</span>
+                                  <span><strong className="text-slate-755 font-extrabold">Bank & Branch:</strong> {quotation.bankDetails.bankBranch}</span>
+                                </li>
+                              </ul>
+                            </div>
+                          ) : (
+                            <div className="max-w-[280px] ml-auto text-[9px] text-slate-400 italic text-right select-none font-sans mt-0.5">
+                              Bank details omitted by customer request.
+                            </div>
+                          )}
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+
+                {/* Bottom block: aligned exactly to bottom of page */}
+                <div className="space-y-1 pt-1 border-t border-slate-100 mt-2 select-none">
+                  {/* Address, Mobile, Email banner stripes */}
+                  <div className="bg-slate-100 border border-slate-200 rounded py-1.5 px-3 text-[8.5px] sm:text-[9.5px] text-slate-650 text-center uppercase font-black tracking-wide leading-none select-none font-sans no-print-background shadow-3xs whitespace-nowrap overflow-hidden text-ellipsis w-full">
+                    {companyProfile.address ? companyProfile.address.replace(/\n/g, ' ') : ''} | Phone: {companyProfile.mobile} | Email: {companyProfile.email}
                   </div>
-                  
-                  <div className="w-full text-[9.5px] font-extrabold text-slate-900 uppercase tracking-wider border-t border-slate-200 pt-1.5">
-                    Authorised Signatory
+                  {/* Page indicator */}
+                  <div className="text-right text-[8.5px] font-bold uppercase tracking-widest text-slate-400 select-none font-mono pr-1 pt-0.5">
+                    Page {pageIdx + 1} of {pages.length}
                   </div>
                 </div>
 
-                {/* Bank Details below Signature block in sleek bullet list layout */}
-                {quotation.bankDetails.showInQuotation ? (
-                  <div className="border border-slate-200 rounded-xl p-3 max-w-[280px] ml-auto bg-slate-50/5 shadow-3xs text-left space-y-1">
-                    <p className="font-extrabold text-[#1E3A8A] uppercase tracking-wider text-[8.5px] pb-1 border-b border-slate-200 font-sans">
-                      Bank Transfer Details:
-                    </p>
-                    <ul className="text-[10px] text-slate-650 font-semibold space-y-1 font-sans">
-                      <li className="flex items-start gap-1">
-                        <span className="text-slate-400 select-none shrink-0">•</span>
-                        <span><strong className="text-slate-750">Account Name:</strong> {quotation.bankDetails.accountName || companyProfile.name}</span>
-                      </li>
-                      <li className="flex items-start gap-1">
-                        <span className="text-slate-400 select-none shrink-0">•</span>
-                        <span><strong className="text-slate-750">Account No:</strong> <span className="font-mono text-[10.5px] font-bold text-slate-900">{quotation.bankDetails.accountNo}</span></span>
-                      </li>
-                      <li className="flex items-start gap-1">
-                        <span className="text-slate-400 select-none shrink-0">•</span>
-                        <span><strong className="text-slate-750">IFSC Code:</strong> <span className="font-mono text-[10.5px] font-bold text-slate-900">{quotation.bankDetails.ifsc}</span></span>
-                      </li>
-                      <li className="flex items-start gap-1">
-                        <span className="text-slate-400 select-none shrink-0">•</span>
-                        <span><strong className="text-slate-750">Bank & Branch:</strong> {quotation.bankDetails.bankBranch}</span>
-                      </li>
-                    </ul>
-                  </div>
-                ) : (
-                  <div className="max-w-[280px] ml-auto text-[9px] text-slate-400 italic text-right select-none font-sans mt-1 pr-1.5">
-                    Bank details omitted by customer request.
-                  </div>
-                )}
-
               </div>
-
-            </div>
-
-            {/* Custom styled light grey bar matching [Company Address | Phone | Email | Website] bottom striped banner */}
-            <div className="bg-slate-100 border border-slate-200 rounded mt-7 py-2 px-3 text-[8.5px] sm:text-[9.5px] text-slate-650 text-center uppercase font-black tracking-wide leading-none select-none font-sans no-print-background shadow-3xs whitespace-nowrap overflow-hidden text-ellipsis w-full">
-              {companyProfile.address ? companyProfile.address.replace(/\n/g, ' ') : ''} | Phone: {companyProfile.mobile} | Email: {companyProfile.email}
-            </div>
-
+            ))}
           </div>
 
         </div>
 
         {/* Action Panel RHS details (e.g. print parameters, checklist helper) */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 no-print">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 no-print sm:sticky sm:top-6">
           <h3 className="font-bold font-display text-slate-800 text-sm border-b border-slate-100 pb-2">
             Print Master Guidelines
           </h3>
           
-          <div className="space-y-3.5 text-xs text-slate-650 leading-relaxed font-medium">
+          <div className="space-y-3.5 text-xs text-slate-650 leading-relaxed font-semibold">
+            <p className="flex gap-1.5 items-start">
+              <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+              <span>Beautiful landscape page-by-page rendering matches exact dimensions of physical A4 standard sheets.</span>
+            </p>
             <p className="flex gap-1.5 items-start">
               <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
               <span>Use standard Chrome PDF printer setting Margins: **None** or **Default** for accurate scaling.</span>
             </p>
             <p className="flex gap-1.5 items-start">
               <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-              <span>Ensure **Background Graphics** checkbox is checked inside browser print configurations for structural laminates preview.</span>
-            </p>
-            <p className="flex gap-1.5 items-start">
-              <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-              <span>The table structure holds exactly 15 rows to align items on a single premium sheet recursively.</span>
+              <span>Verify that standard printer **Background Graphics** checkbox is checked before trigger signature prints.</span>
             </p>
           </div>
         </div>
@@ -848,7 +968,7 @@ export default function A4Preview({
                 <button
                   type="button"
                   onClick={() => setShareType(null)}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-650 rounded-xl"
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-650 rounded-xl cursor-pointer font-bold"
                 >
                   Cancel
                 </button>
