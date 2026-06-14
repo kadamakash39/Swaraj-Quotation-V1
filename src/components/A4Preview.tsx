@@ -75,6 +75,31 @@ interface A4PreviewProps {
   onBack: () => void;
 }
 
+// Convert raw SVG data URIs into base64 encoded strings to eliminate browser loading issues and canvas taint exceptions
+const sanitizeSvgSrc = (src: string) => {
+  if (!src) return src;
+  if (src.startsWith('data:image/svg+xml;utf8,')) {
+    const rawSvg = src.substring('data:image/svg+xml;utf8,'.length);
+    try {
+      return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(rawSvg)));
+    } catch (e) {
+      return src;
+    }
+  }
+  if (src.startsWith('data:image/svg+xml') && !src.includes(';base64,')) {
+    const parts = src.split(',');
+    if (parts.length > 1) {
+      try {
+        const content = decodeURIComponent(parts[1]);
+        return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(content)));
+      } catch (e) {
+        return src;
+      }
+    }
+  }
+  return src;
+};
+
 export default function A4Preview({
   quotation,
   customers,
@@ -134,20 +159,22 @@ export default function A4Preview({
       html2canvas: { 
         scale: 2.0, // Generates ultra crisp high density images and scaling text
         useCORS: true, 
-        logging: false,
+        logging: true,
         allowTaint: false, // Prevent security exception with untrusted canvas tainting
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        scrollX: 0, // Bypass scrolling issues 
+        scrollY: 0
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], after: '.a4-page-print' }
+      pagebreak: { mode: ['css', 'legacy'] }
     };
 
     const runHtml2Pdf = (html2pdfLib: any) => {
-      html2pdfLib().from(element).set(opt).save().then(() => {
+      html2pdfLib().set(opt).from(element).save().then(() => {
         setIsDownloadingPdf(false);
       }).catch((err: any) => {
         console.error("PDF generation failure:", err);
-        alert("Failed to generate PDF automatically. Please try the printer option instead.");
+        alert("Failed to generate PDF automatically (this occasionally happens in sandboxed dev portals due to third-party secure assets). Please click the green 'Print / Save A4 PDF' option instead, then select 'Save as PDF' from the printer options to download your A4 quotation with perfect layout.");
         setIsDownloadingPdf(false);
       });
     };
@@ -161,7 +188,7 @@ export default function A4Preview({
         runHtml2Pdf((window as any).html2pdf);
       };
       script.onerror = () => {
-        alert("Could not load PDF engine from remote secure network source. Please use standard Print/Save Option.");
+        alert("Could not load PDF engine from remote secure network source. Please use standard 'Print / Save A4 PDF' option.");
         setIsDownloadingPdf(false);
       };
       document.body.appendChild(script);
@@ -378,6 +405,8 @@ export default function A4Preview({
           body, #root {
             background: #ffffff !important;
             color: #1e293b !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .no-print {
             display: none !important;
@@ -392,16 +421,24 @@ export default function A4Preview({
             background: #ffffff !important;
           }
           .a4-page-print {
+            width: 210mm !important;
+            height: 297mm !important;
+            min-height: 297mm !important;
+            max-height: 297mm !important;
+            padding: 12mm 15mm !important;
+            margin: 0 auto !important;
+            margin-bottom: 0mm !important;
+            box-sizing: border-box !important;
             page-break-after: always !important;
             break-after: always !important;
             border: none !important;
             box-shadow: none !important;
-            margin: 0 auto !important;
             background: #ffffff !important;
           }
           .a4-page-print:last-child {
             page-break-after: avoid !important;
             break-after: avoid !important;
+            margin-bottom: 0mm !important;
           }
           tr {
             break-inside: avoid !important;
@@ -517,7 +554,7 @@ export default function A4Preview({
                     <div className="flex items-start gap-4">
                       {companyProfile.logo ? (
                         <img 
-                          src={companyProfile.logo} 
+                          src={sanitizeSvgSrc(companyProfile.logo)} 
                           alt="Logo" 
                           className="w-16 h-16 object-contain rounded border border-slate-100 bg-white" 
                         />
@@ -639,7 +676,7 @@ export default function A4Preview({
                                   <td className="p-2 border-r border-[#cbd5e1] text-center">
                                     {item.image ? (
                                       <img 
-                                        src={item.image} 
+                                        src={sanitizeSvgSrc(item.image)} 
                                         alt={item.description} 
                                         className="h-28 w-28 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm" 
                                       />
@@ -842,7 +879,7 @@ export default function A4Preview({
                             <div className="h-20 flex items-center justify-center w-full relative">
                               {companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
                                 <img 
-                                  src={companyProfile.stampAndSignature || companyProfile.stamp} 
+                                  src={sanitizeSvgSrc(companyProfile.stampAndSignature || companyProfile.stamp)} 
                                   alt="Authorized Stamp & Seal" 
                                   className="max-h-20 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95" 
                                 />
