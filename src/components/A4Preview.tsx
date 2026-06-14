@@ -247,64 +247,73 @@ export default function A4Preview({
             className="w-full min-w-[760px] max-w-[850px] mx-auto bg-white border border-slate-200 p-10 font-sans shadow-lg text-slate-800 tracking-tight"
             style={{ minHeight: '1120px' }}
           >
-            {/* Page Header matching current layout format from image */}
-            <div className="flex justify-between items-start border-b border-slate-300 pb-5">
-              <div className="flex items-start gap-3.5">
-                {companyProfile.logo ? (
-                  <img 
-                    src={companyProfile.logo} 
-                    alt="Logo" 
-                    className="w-16 h-16 object-contain rounded border border-slate-100" 
-                  />
-                ) : (
-                  <div className="w-16 h-16 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-xs rounded border border-dashed border-slate-200 uppercase">
-                    Logo
-                  </div>
-                )}
-                <div>
-                  <h1 className="text-lg font-extrabold tracking-tight text-slate-900 leading-tight mb-1">{companyProfile.name}</h1>
-                  <p className="text-[10px] text-slate-500 max-w-[320px] leading-relaxed">{companyProfile.address}</p>
-                  <p className="text-[10px] text-slate-550 font-medium">Email: {companyProfile.email}</p>
-                  <p className="text-[10px] text-slate-550 font-medium">Mobile: {companyProfile.mobile}</p>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <h2 className="text-2xl font-black text-[#1E40AF] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
-              </div>
-            </div>
-
-            {/* Billing Parties and metadata structure */}
-            <div className="grid grid-cols-2 gap-4 py-5 border-b border-slate-300 text-[11px] leading-normal font-sans">
-              <div className="space-y-0.5">
-                <p className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Bill To:</p>
-                <p className="font-extrabold text-slate-900 text-xs tracking-tight">{matchedCustomer?.name || '[Client Name]'}</p>
-                {matchedCustomer?.companyName && (
-                  <p className="font-bold text-slate-700 leading-none">{matchedCustomer.companyName}</p>
-                )}
-                <p className="text-slate-600 max-w-[280px] leading-snug">{matchedCustomer?.address || '[Client Address]'}</p>
-                {matchedCustomer?.city && (
-                  <p className="text-slate-600 font-medium">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
-                )}
-                <p className="text-slate-500 font-semibold mt-1">
-                  GST: {matchedCustomer?.gstin || '[Client GST]'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
-                </p>
-              </div>
-
-              <div className="flex justify-end items-end pb-1.5 text-right">
-                <div className="space-y-1 text-slate-800 text-[11px] font-medium leading-tight">
-                  <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Quotation No:</span> <span className="font-mono font-extrabold text-slate-950 text-xs">{quotation.id}</span></p>
-                  <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Date:</span> <span className="font-mono">{quotation.date}</span></p>
-                  <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Validity:</span> <span className="font-mono text-slate-700">{quotation.validityDate}</span></p>
-                  <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Prepared By:</span> <span className="font-bold text-[#1E3A8A] uppercase tracking-wide">{quotation.createdBy || 'Admin'}</span></p>
-                </div>
-              </div>
-            </div>
-
-            {/* Custom high-visibility item layout table */}
+            {/* Custom high-visibility item layout table containing the repeating sections in the thead */}
             <div className="py-4">
               <table className="w-full text-left text-[11px] border-collapse border border-slate-300 font-sans shadow-2xs">
                 <thead>
+                  {/* Page Header Row - Repeats automatically on multi-page print */}
+                  <tr className="border-b border-slate-300">
+                    <td colSpan={10} className="p-0 border-none bg-white">
+                      <div className="flex justify-between items-start pb-5 text-left">
+                        <div className="flex items-start gap-3.5">
+                          {companyProfile.logo ? (
+                            <img 
+                              src={companyProfile.logo} 
+                              alt="Logo" 
+                              className="w-16 h-16 object-contain rounded border border-slate-100" 
+                            />
+                          ) : (
+                            <div className="w-16 h-16 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-xs rounded border border-dashed border-slate-200 uppercase">
+                              Logo
+                            </div>
+                          )}
+                          <div>
+                            <h1 className="text-lg font-extrabold tracking-tight text-slate-900 leading-tight mb-1">{companyProfile.name}</h1>
+                            <p className="text-[10px] text-slate-500 max-w-[320px] leading-relaxed">{companyProfile.address}</p>
+                            <p className="text-[10px] text-slate-550 font-medium">Email: {companyProfile.email}</p>
+                            <p className="text-[10px] text-slate-550 font-medium">Mobile: {companyProfile.mobile}</p>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <h2 className="text-2xl font-black text-[#1E40AF] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Billing Parties and metadata structure Row - Repeats automatically on multi-page print */}
+                  <tr className="border-b border-slate-300">
+                    <td colSpan={10} className="p-0 border-none bg-white">
+                      <div className="grid grid-cols-2 gap-4 py-5 text-[11px] leading-normal font-sans">
+                        <div className="space-y-0.5 text-left">
+                          <p className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Bill To:</p>
+                          <p className="font-extrabold text-slate-900 text-xs tracking-tight">{matchedCustomer?.name || '[Client Name]'}</p>
+                          {matchedCustomer?.companyName && (
+                            <p className="font-bold text-slate-700 leading-none">{matchedCustomer.companyName}</p>
+                          )}
+                          <p className="text-slate-600 max-w-[280px] leading-snug">{matchedCustomer?.address || '[Client Address]'}</p>
+                          {matchedCustomer?.city && (
+                            <p className="text-slate-600 font-medium">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
+                          )}
+                          <p className="text-slate-500 font-semibold mt-1">
+                            GST: {matchedCustomer?.gstin || '[Client GST]'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex justify-end items-end pb-1.5 text-right font-sans">
+                          <div className="space-y-1 text-slate-800 text-[11px] font-medium leading-tight">
+                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Quotation No:</span> <span className="font-mono font-extrabold text-slate-950 text-xs">{quotation.id}</span></p>
+                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Date:</span> <span className="font-mono">{quotation.date}</span></p>
+                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Validity:</span> <span className="font-mono text-slate-700">{quotation.validityDate}</span></p>
+                            <p><span className="font-bold text-slate-500 uppercase tracking-widest text-[9.5px] pr-1">Prepared By:</span> <span className="font-bold text-[#1E3A8A] uppercase tracking-wide">{quotation.createdBy || 'Admin'}</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Item Columns Row */}
                   <tr className="bg-[#1E3A8A] text-white border-b border-slate-300">
                     <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
                     <th className="p-1.5 w-[25%] text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Description</th>
