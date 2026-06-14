@@ -5,6 +5,8 @@ import {
   Download, Loader2
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // Convert numbers into Words in standard Indian Rupees / Paise formatting
 export function convertNumberToWords(num: number): string {
@@ -143,55 +145,56 @@ export default function A4Preview({
   };
 
   // Dynamically compile & download document canvas block as custom named PDF file
-  const handleDownloadPDF = () => {
-    const element = document.getElementById('swraj-a4-pdf-canvas');
-    if (!element) {
-      alert("Error: Print canvas selector could not be acquired.");
-      return;
-    }
-
+  const handleDownloadPDF = async () => {
     setIsDownloadingPdf(true);
 
-    const opt = {
-      margin: 0,
-      filename: `Quotation_${quotation.id}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2.0, // Generates ultra crisp high density images and scaling text
-        useCORS: true, 
-        logging: true,
-        allowTaint: false, // Prevent security exception with untrusted canvas tainting
-        backgroundColor: '#ffffff',
-        scrollX: 0, // Bypass scrolling issues 
-        scrollY: 0
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] }
-    };
+    try {
+      // Find all custom styled A4 physical elements
+      const pageElements = document.querySelectorAll('.a4-page-print');
+      
+      if (!pageElements || pageElements.length === 0) {
+        throw new Error("No layout pages found with class '.a4-page-print'.");
+      }
 
-    const runHtml2Pdf = (html2pdfLib: any) => {
-      html2pdfLib().set(opt).from(element).save().then(() => {
-        setIsDownloadingPdf(false);
-      }).catch((err: any) => {
-        console.error("PDF generation failure:", err);
-        alert("Failed to generate PDF automatically (this occasionally happens in sandboxed dev portals due to third-party secure assets). Please click the green 'Print / Save A4 PDF' option instead, then select 'Save as PDF' from the printer options to download your A4 quotation with perfect layout.");
-        setIsDownloadingPdf(false);
+      // Initialize jsPDF A4 portrait document
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
       });
-    };
 
-    if ((window as any).html2pdf) {
-      runHtml2Pdf((window as any).html2pdf);
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = () => {
-        runHtml2Pdf((window as any).html2pdf);
-      };
-      script.onerror = () => {
-        alert("Could not load PDF engine from remote secure network source. Please use standard 'Print / Save A4 PDF' option.");
-        setIsDownloadingPdf(false);
-      };
-      document.body.appendChild(script);
+      for (let i = 0; i < pageElements.length; i++) {
+        const pageEl = pageElements[i] as HTMLElement;
+
+        // Render high density canvas
+        const canvas = await html2canvas(pageEl, {
+          scale: 2.0, // perfect crispness for premium font rendering & logo assets
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff',
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: document.documentElement.offsetWidth,
+          windowHeight: document.documentElement.offsetHeight
+        });
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.98);
+
+        // Add page if other than first page
+        if (i > 0) {
+          pdf.addPage('a4', 'portrait');
+        }
+
+        pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+      }
+
+      pdf.save(`Quotation_${quotation.id}.pdf`);
+    } catch (err: any) {
+      console.error("PDF generation failure:", err);
+      alert("Failed to automatically generate and download your high-resolution A4 document. Please try again or download via secondary channel.");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -494,14 +497,6 @@ export default function A4Preview({
         </div>
 
         <div className="flex flex-wrap gap-2.5">
-          <button
-            onClick={triggerPrint}
-            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
-          >
-            <Printer className="w-4 h-4" />
-            Print / Save A4 PDF
-          </button>
-
           <button
             onClick={handleDownloadPDF}
             disabled={isDownloadingPdf}
