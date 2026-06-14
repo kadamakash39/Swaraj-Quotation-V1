@@ -80,22 +80,39 @@ interface A4PreviewProps {
 // Convert raw SVG data URIs into base64 encoded strings to eliminate browser loading issues and canvas taint exceptions
 const sanitizeSvgSrc = (src: string) => {
   if (!src) return src;
-  if (src.startsWith('data:image/svg+xml;utf8,')) {
-    const rawSvg = src.substring('data:image/svg+xml;utf8,'.length);
-    try {
-      return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(rawSvg)));
-    } catch (e) {
-      return src;
-    }
+  
+  // If it's already a base64 encoded svg, return as is
+  if (src.startsWith('data:image/svg+xml;base64,')) {
+    return src;
   }
-  if (src.startsWith('data:image/svg+xml') && !src.includes(';base64,')) {
-    const parts = src.split(',');
-    if (parts.length > 1) {
+
+  // If it's a representation of SVG (either utf8 or plain XML URL-encoded)
+  if (src.startsWith('data:image/svg+xml')) {
+    let rawContent = '';
+    if (src.startsWith('data:image/svg+xml;utf8,')) {
+      rawContent = src.substring('data:image/svg+xml;utf8,'.length);
+    } else {
+      const parts = src.split(',');
+      if (parts.length > 1) {
+        rawContent = parts[1];
+      }
+    }
+
+    if (rawContent) {
       try {
-        const content = decodeURIComponent(parts[1]);
-        return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(content)));
+        // Try decoding first to convert any %23, %20, etc. into real characters like # and spaces
+        const decoded = decodeURIComponent(rawContent);
+        // Base64 encode the final raw XML UTF-8 string
+        const base64 = btoa(unescape(encodeURIComponent(decoded)));
+        return 'data:image/svg+xml;base64,' + base64;
       } catch (e) {
-        return src;
+        try {
+          // Fallback if decodeURIComponent fails
+          const base64 = btoa(unescape(encodeURIComponent(rawContent)));
+          return 'data:image/svg+xml;base64,' + base64;
+        } catch (e2) {
+          return src;
+        }
       }
     }
   }
@@ -166,17 +183,15 @@ export default function A4Preview({
       for (let i = 0; i < pageElements.length; i++) {
         const pageEl = pageElements[i] as HTMLElement;
 
-        // Render high density canvas
+        // Render high density canvas without hardcoding parent window size which can crash in responsive frame sandboxes
         const canvas = await html2canvas(pageEl, {
           scale: 2.0, // perfect crispness for premium font rendering & logo assets
           useCORS: true,
-          allowTaint: false,
+          allowTaint: false, // Prevents security errors on canvas.toDataURL
           backgroundColor: '#ffffff',
           logging: false,
           scrollX: 0,
-          scrollY: 0,
-          windowWidth: document.documentElement.offsetWidth,
-          windowHeight: document.documentElement.offsetHeight
+          scrollY: 0
         });
 
         const imgData = canvas.toDataURL('image/jpeg', 0.98);
@@ -192,7 +207,9 @@ export default function A4Preview({
       pdf.save(`Quotation_${quotation.id}.pdf`);
     } catch (err: any) {
       console.error("PDF generation failure:", err);
-      alert("Failed to automatically generate and download your high-resolution A4 document. Please try again or download via secondary channel.");
+      const errMsg = err?.message || err?.toString() || "Unknown security context";
+      alert(`Automated PDF render was constrained by browser sandbox policy (${errMsg}).\n\nNo worries! Clicking OK will launch your system's print center with perfect A4 alignment. Simply select 'Save as PDF' from your printer destination list.`);
+      window.print();
     } finally {
       setIsDownloadingPdf(false);
     }
