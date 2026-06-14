@@ -327,23 +327,23 @@ export default function A4Preview({
 
   // Dynamically calculate row heights in mm based on description contents width to guarantee no browser overflow
   const getRowHeight = (row: LayoutRow) => {
-    if (row.type === 'section-header') return 14;
-    if (row.type === 'section-subtotal') return 14;
+    if (row.type === 'section-header') return 10;
+    if (row.type === 'section-subtotal') return 10;
     if (row.item) {
       const charCount = (row.item.description || '').length;
-      // Estimate lines inside the newly expanded 30% width description column
-      const lines = Math.max(1, Math.ceil(charCount / 35));
-      const textHeight = lines * 5 + 10; // 5mm per line + 10mm base padding
+      // Estimate wrapped lines inside the description column (~38 chars/line)
+      const lines = Math.max(1, Math.ceil(charCount / 38));
+      const textHeight = lines * 4.2 + 6; // 4.2mm per line + 6mm base padding
       if (hasAnyImages) {
-        // If it has an image and this item has an image, it's at least 42mm (112px image + padding)
+        // A populated image cell now renders a large ~54mm thumbnail
         const hasImg = !!row.item.image;
         if (hasImg) {
-          return Math.max(42, textHeight);
+          return Math.max(56, textHeight);
         }
       }
-      return Math.max(18, textHeight);
+      return Math.max(14, textHeight);
     }
-    return 18;
+    return 14;
   };
 
   interface PageData {
@@ -360,9 +360,9 @@ export default function A4Preview({
     
     // Check if everything fits on exactly one page.
     // Single page budget parameters (in mm):
-    // Margin (24) + Header (36) + Bill To (42) + Table Header (10) + Totals Block (125) + Footer stripe (12) = 249mm
-    // Available for rows: 297 - 249 = 48mm.
-    if (totalRowHeight <= 48) {
+    // Top/Bottom padding (36) + Header (34) + Bill To (40) + Table Header (10) + Totals Block (118) = 238mm
+    // Available for rows: 297 - 238 = ~59mm.
+    if (totalRowHeight <= 59) {
       return [{
         rows: flatRows,
         showBillTo: true,
@@ -370,9 +370,10 @@ export default function A4Preview({
       }];
     }
 
-    // Programmatical page by page split with safe layout buffers against physical overflows
-    // Page 1 Overheads budget: 110mm. Printable row area: ~163mm. Budget 115mm (leaves 48mm safety buffer)
-    const page1RowBudget = 115;
+    // Programmatical page by page split with safe layout buffers against physical overflows.
+    // Page 1 printable row area: ~173mm (261mm content area - 34 header - 40 billTo - 10 table header).
+    // Budget 150mm leaves a ~23mm safety buffer.
+    const page1RowBudget = 150;
     let currentRows: LayoutRow[] = [];
     let currentHeight = 0;
 
@@ -400,8 +401,8 @@ export default function A4Preview({
       const remainingRows = flatRows.slice(i);
       const remainingHeight = remainingRows.reduce((sum, r) => sum + getRowHeight(r), 0);
       
-      // Page budget for rows on final page showing subtotals/calculations: 273 - Header (36) - Table Header (10) - Totals Block (125) - Footer (12) = 90mm. Budget 60mm (leaves 30mm safety buffer)
-      const finalPageRowBudget = 60;
+      // Final page also renders the totals/specs/terms block. Content area 261mm - Header (34) - Table Header (10) - Totals Block (~118) = ~99mm available for rows. Budget 80mm leaves a ~19mm safety buffer.
+      const finalPageRowBudget = 80;
       
       if (remainingHeight <= finalPageRowBudget) {
         pages.push({
@@ -413,8 +414,8 @@ export default function A4Preview({
         break;
       }
       
-      // Middle Page available row area: ~217mm. Budget 140mm (leaves 77mm safety buffer)
-      const middlePageRowBudget = 140;
+      // Middle pages only carry the header + table. Content area 261mm - Header (34) - Table Header (10) = ~217mm available for rows. Budget 195mm leaves a ~22mm safety buffer.
+      const middlePageRowBudget = 195;
       while (i < flatRows.length) {
         const row = flatRows[i];
         const h = getRowHeight(row);
@@ -843,16 +844,16 @@ export default function A4Preview({
                           {/* Column Headers */}
                           <tr className="bg-[#1E3A8A] text-white border-b border-[#cbd5e1]">
                             <th className="p-2 w-[5%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Sr No</th>
-                            <th className={`p-2 ${hasAnyImages ? 'w-[30%]' : 'w-[42%]'} text-left border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]`}>Item Description</th>
+                            <th className={`p-2 ${hasAnyImages ? 'w-[21%]' : 'w-[42%]'} text-left border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]`}>Item Description</th>
                             {hasAnyImages && (
-                              <th className="p-2 w-[12%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Item Image</th>
+                              <th className="p-2 w-[24%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Item Image</th>
                             )}
                             <th className="p-2 w-[6%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Qty</th>
-                            <th className="p-2 w-[6%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Unit</th>
-                            <th className="p-2 w-[10%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Rate</th>
+                            <th className="p-2 w-[5%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Unit</th>
+                            <th className="p-2 w-[9%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Rate</th>
                             <th className="p-2 w-[5%] text-center border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc %</th>
                             <th className="p-2 w-[8%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Disc. Amt</th>
-                            <th className="p-2 w-[8%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Net Rate</th>
+                            <th className="p-2 w-[7%] text-right border-r border-[#cbd5e1] font-bold uppercase tracking-tight text-[9.5px]">Net Rate</th>
                             <th className="p-2 w-[10%] text-right font-bold uppercase tracking-tight text-[9.5px]">Amount</th>
                           </tr>
                         </thead>
@@ -909,7 +910,7 @@ export default function A4Preview({
                                       <img 
                                         src={sanitizeSvgSrc(item.image)} 
                                         alt={item.description} 
-                                        className="h-24 w-24 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm"
+                                        className="w-full max-w-[200px] h-auto max-h-[200px] object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm"
                                         crossOrigin="anonymous"
                                         referrerPolicy="no-referrer"
                                       />
