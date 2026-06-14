@@ -23,7 +23,7 @@ export default function Reports({ quotations, customers }: ReportsProps) {
   const calculateTotals = (q: Quotation) => {
     let subtotal = 0;
     q.items.forEach(item => {
-      const disc = q.masterDiscountPercent;
+      const disc = (item.discountPercent && item.discountPercent > 0 ? item.discountPercent : q.masterDiscountPercent) || 0;
       subtotal += item.qty * (item.rate * (1 - disc / 100));
     });
     const gst = subtotal * 0.18;

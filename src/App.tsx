@@ -329,7 +329,7 @@ export default function App() {
   const getQuoteTotalValue = (q: Quotation) => {
     let sub = 0;
     q.items.forEach(it => {
-      const activeDisc = q.masterDiscountPercent;
+      const activeDisc = (it.discountPercent && it.discountPercent > 0 ? it.discountPercent : q.masterDiscountPercent) || 0;
       sub += it.qty * (it.rate * (1 - activeDisc / 100));
     });
     return sub * 1.18; // Inc standard 18% GST estimate

@@ -89,12 +89,15 @@ export default function A4Preview({
 
   const matchedCustomer = customers.find(c => c.id === quotation.customerId);
 
+  // Effective per-item discount: item-level override falls back to master discount
+  const effDiscOf = (item: typeof quotation.items[number]) =>
+    (item.discountPercent && item.discountPercent > 0 ? item.discountPercent : quotation.masterDiscountPercent) || 0;
+
   // India ERP standard taxation calculations
   const grossSubtotal = quotation.items.reduce((sum, item) => sum + (item.qty * item.rate), 0);
 
   const taxableValue = quotation.items.reduce((sum, item) => {
-    const activeDisc = quotation.masterDiscountPercent;
-    const discountedRate = item.rate * (1 - activeDisc / 100);
+    const discountedRate = item.rate * (1 - effDiscOf(item) / 100);
     return sum + (item.qty * discountedRate);
   }, 0);
 
@@ -161,17 +164,35 @@ export default function A4Preview({
       
       {/* Scope print inline overrides to force full background print graphics and clean sizing */}
       <style>{`
+        .print-running-header { display: none; }
         @media print {
           @page {
             size: A4 portrait;
-            margin: 12mm 15mm 12mm 15mm;
+            margin: 34mm 12mm 14mm 12mm;
           }
-          body {
+          html, body {
             background: #ffffff !important;
             color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .no-print {
             display: none !important;
+          }
+          /* Hide the on-screen letterhead; the fixed running header replaces it on every page */
+          .screen-letterhead {
+            display: none !important;
+          }
+          /* Repeating company letterhead printed at the top of every page */
+          .print-running-header {
+            display: flex !important;
+            position: fixed;
+            top: -30mm;
+            left: 0;
+            right: 0;
+            height: 28mm;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           #swraj-a4-pdf-canvas {
             border: none !important;
@@ -180,10 +201,25 @@ export default function A4Preview({
             margin: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
+            min-width: 0 !important;
             min-height: auto !important;
             background: transparent !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          /* Repeat the item table column headers on every page */
+          #swraj-items-table thead {
+            display: table-header-group !important;
+          }
+          /* Never split a line item, image, or summary block across two pages */
+          #swraj-items-table tr,
+          #swraj-items-table img {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .avoid-break {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
           .no-print-background {
             -webkit-print-color-adjust: exact !important;
@@ -247,8 +283,28 @@ export default function A4Preview({
             className="w-full min-w-[760px] max-w-[850px] mx-auto bg-white border border-slate-200 p-10 font-sans shadow-lg text-slate-800 tracking-tight"
             style={{ minHeight: '1120px' }}
           >
+            {/* Repeating print-only letterhead: shown at the top of EVERY printed page */}
+            <div className="print-running-header items-center justify-between bg-white px-1 pb-1.5 border-b-2 border-[#1E3A8A]">
+              <div className="flex items-center gap-3">
+                {companyProfile.logo ? (
+                  <img src={companyProfile.logo} alt="Logo" className="w-12 h-12 object-contain" />
+                ) : (
+                  <div className="w-12 h-12 bg-slate-50 text-slate-350 flex items-center justify-center font-bold text-[9px] rounded border border-dashed border-slate-200 uppercase">Logo</div>
+                )}
+                <div>
+                  <h1 className="text-base font-extrabold tracking-tight text-slate-900 leading-tight">{companyProfile.name}</h1>
+                  <p className="text-[9px] text-slate-500 leading-snug max-w-[360px]">{companyProfile.address ? companyProfile.address.replace(/\n/g, ' ') : ''}</p>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <h2 className="text-xl font-black text-[#1E40AF] tracking-widest leading-none uppercase">QUOTATION</h2>
+                <p className="text-[9px] font-bold text-slate-600 mt-1">No: <span className="font-mono text-slate-900">{quotation.id}</span></p>
+                <p className="text-[9px] font-bold text-slate-600">Date: <span className="font-mono text-slate-900">{quotation.date}</span></p>
+              </div>
+            </div>
+
             {/* Page Header matching current layout format from image */}
-            <div className="flex justify-between items-start border-b border-slate-300 pb-5">
+            <div className="screen-letterhead flex justify-between items-start border-b border-slate-300 pb-5">
               <div className="flex items-start gap-3.5">
                 {companyProfile.logo ? (
                   <img 
@@ -303,19 +359,19 @@ export default function A4Preview({
 
             {/* Custom high-visibility item layout table */}
             <div className="py-4">
-              <table className="w-full text-left text-[11px] border-collapse border border-slate-300 font-sans shadow-2xs">
+              <table id="swraj-items-table" className="w-full text-left text-[11px] border-collapse border border-slate-300 font-sans shadow-2xs">
                 <thead>
                   <tr className="bg-[#1E3A8A] text-white border-b border-slate-300">
                     <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
-                    <th className="p-1.5 w-[25%] text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Description</th>
-                    <th className="p-1.5 w-[25%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Image</th>
-                    <th className="p-1.5 w-[8%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">HSN/SAC</th>
+                    <th className="p-1.5 w-[24%] text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Description</th>
+                    <th className="p-1.5 w-[22%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Image</th>
                     <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Qty</th>
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Unit</th>
+                    <th className="p-1.5 w-[6%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Unit</th>
                     <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Rate</th>
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc %</th>
+                    <th className="p-1.5 w-[6%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc %</th>
+                    <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc. Amt</th>
                     <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Net Rate</th>
-                    <th className="p-1.5 w-[8%] text-right font-bold uppercase tracking-tight text-[10px]">Amount</th>
+                    <th className="p-1.5 w-[9%] text-right font-bold uppercase tracking-tight text-[10px]">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="font-medium text-slate-750">
@@ -350,8 +406,9 @@ export default function A4Preview({
                           </tr>
                           {group.items.map((item) => {
                             const idx = quotation.items.findIndex(qi => qi.id === item.id);
-                            const activeDisc = quotation.masterDiscountPercent;
+                            const activeDisc = effDiscOf(item);
                             const discountedRate = item.rate * (1 - activeDisc / 100);
+                            const discountAmount = item.qty * item.rate * (activeDisc / 100);
                             const finalAmount = item.qty * discountedRate;
 
                             return (
@@ -369,7 +426,6 @@ export default function A4Preview({
                                     <span className="text-slate-300 text-[9px] font-bold block uppercase tracking-tighter">No Pic</span>
                                   )}
                                 </td>
-                                <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-650 font-bold">9403</td>
                                 <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-800 font-bold">{item.qty}</td>
                                 <td className="p-1 text-center border-r border-slate-300">
                                   <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-bold border border-slate-200 inline-block uppercase leading-none min-w-[38px] text-center shadow-3xs">
@@ -381,6 +437,9 @@ export default function A4Preview({
                                 </td>
                                 <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-700">
                                   {activeDisc > 0 ? `${activeDisc}%` : '—'}
+                                </td>
+                                <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700">
+                                  {discountAmount > 0 ? `₹${discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                                 </td>
                                 <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700 font-semibold">
                                   ₹{discountedRate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -405,8 +464,7 @@ export default function A4Preview({
                             <td className="p-1 border-r border-slate-200"></td>
                             <td className="p-1.5 pr-2.5 text-right font-mono text-[#1E3A8A] font-black bg-slate-100/60 shadow-inner">
                               ₹{group.items.reduce((sum, item) => {
-                                const activeDisc = quotation.masterDiscountPercent;
-                                const discountedRate = item.rate * (1 - activeDisc / 100);
+                                const discountedRate = item.rate * (1 - effDiscOf(item) / 100);
                                 return sum + (item.qty * discountedRate);
                               }, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
@@ -417,8 +475,9 @@ export default function A4Preview({
 
                     // Otherwise show standard flat items
                     return quotation.items.map((item, idx) => {
-                      const activeDisc = quotation.masterDiscountPercent;
+                      const activeDisc = effDiscOf(item);
                       const discountedRate = item.rate * (1 - activeDisc / 100);
+                      const discountAmount = item.qty * item.rate * (activeDisc / 100);
                       const finalAmount = item.qty * discountedRate;
 
                       return (
@@ -444,9 +503,6 @@ export default function A4Preview({
                             )}
                           </td>
 
-                          {/* HSN/SAC code */}
-                          <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-600 font-medium font-bold">9403</td>
-
                           {/* Qty */}
                           <td className="p-1 text-center border-r border-slate-300 font-mono text-slate-800 font-bold">{item.qty}</td>
 
@@ -467,6 +523,11 @@ export default function A4Preview({
                             {activeDisc > 0 ? `${activeDisc}%` : '—'}
                           </td>
 
+                          {/* Discount Amount */}
+                          <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700">
+                            {discountAmount > 0 ? `₹${discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                          </td>
+
                           {/* Net Rate */}
                           <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700 font-semibold">
                             ₹{discountedRate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -485,7 +546,7 @@ export default function A4Preview({
             </div>
 
             {/* Total Grand Amount Chargeable in Words */}
-            <div className="border border-slate-300 bg-slate-50/40 rounded-lg px-3 py-1.5 mt-3 text-[10px] font-sans flex items-center gap-2 shadow-3xs flex-wrap">
+            <div className="avoid-break border border-slate-300 bg-slate-50/40 rounded-lg px-3 py-1.5 mt-3 text-[10px] font-sans flex items-center gap-2 shadow-3xs flex-wrap">
               <span className="font-extrabold text-slate-500 uppercase tracking-widest text-[8.5px] bg-slate-200/70 border border-slate-300 rounded px-1.5 py-0.5 leading-none select-none">
                 Amount in Words
               </span>
@@ -495,7 +556,7 @@ export default function A4Preview({
             </div>
 
             {/* Under Table Breakdown layout exactly matching screenshot blueprint */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start mt-4 text-[11px] font-sans">
+            <div className="avoid-break grid grid-cols-1 md:grid-cols-2 gap-6 items-start mt-4 text-[11px] font-sans">
               
               {/* Left Side: Specs, bank transfer details, terms conditions */}
               <div className="space-y-4">

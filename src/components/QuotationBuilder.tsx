@@ -141,10 +141,14 @@ export default function QuotationBuilder({
   // Selected Customer detail
   const selectedCustomer = customers.find(c => c.id === customerId);
 
+  // Effective per-item discount: item-level override falls back to master discount
+  const effDiscOf = (item: { discountPercent?: number }) =>
+    (item.discountPercent && item.discountPercent > 0 ? item.discountPercent : masterDiscountPercent) || 0;
+
   // Math totals calculation
   const calculateSubtotal = () => {
     return items.reduce((sum, item) => {
-      const rateAfterDiscount = item.rate * (1 - masterDiscountPercent / 100);
+      const rateAfterDiscount = item.rate * (1 - effDiscOf(item) / 100);
       return sum + (item.qty * rateAfterDiscount);
     }, 0);
   };
@@ -659,7 +663,7 @@ export default function QuotationBuilder({
 
               {/* Master discount input */}
               <div className="space-y-0.5">
-                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Master Discount (%)</label>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Default Discount (%) — item overrides</label>
                 <div className="relative">
                   <input
                     type="number"
@@ -761,6 +765,7 @@ export default function QuotationBuilder({
                       <th className="py-2 px-2 w-16 text-center">UOM</th>
                       <th className="py-2 px-2 w-12 text-center">Qty</th>
                       <th className="py-2 px-2 w-20 text-right">Rate (₹)</th>
+                      <th className="py-2 px-2 w-16 text-center">Disc %</th>
                       <th className="py-2 px-2 w-20 text-right">After Disc</th>
                       <th className="py-2 px-2 w-22 text-right">Amount (₹)</th>
                       <th className="py-2 px-2 w-16 text-center">Actions</th>
@@ -768,7 +773,7 @@ export default function QuotationBuilder({
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {items.map((item, index) => {
-                      const discountedRate = item.rate * (1 - masterDiscountPercent / 100);
+                      const discountedRate = item.rate * (1 - effDiscOf(item) / 100);
                       const finalAmount = item.qty * discountedRate;
 
                       return (
@@ -850,6 +855,19 @@ export default function QuotationBuilder({
                               value={item.rate}
                               onChange={(e) => handleUpdateItem(item.id, { rate: Math.max(0, parseFloat(e.target.value) || 0) })}
                               className="w-18 border border-slate-200 p-1 rounded text-[11px] text-right focus:outline-none focus:border-blue-500 font-mono font-bold"
+                            />
+                          </td>
+
+                          {/* Item-level Discount % */}
+                          <td className="py-2 px-2 text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={item.discountPercent}
+                              onChange={(e) => handleUpdateItem(item.id, { discountPercent: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                              className="w-12 border border-slate-200 p-1 rounded text-[11px] text-center focus:outline-none focus:border-blue-500 font-mono font-bold"
+                              placeholder={masterDiscountPercent ? String(masterDiscountPercent) : '0'}
                             />
                           </td>
 
@@ -953,6 +971,7 @@ export default function QuotationBuilder({
                                 <th className="py-2 px-2 w-14 text-center">UOM</th>
                                 <th className="py-2 px-2 w-10 text-center">Qty</th>
                                 <th className="py-2 px-2 w-18 text-right">Rate (₹)</th>
+                                <th className="py-2 px-2 w-14 text-center">Disc %</th>
                                 <th className="py-2 px-2 w-20 text-right">Amount (₹)</th>
                                 <th className="py-2 px-2 w-28 text-center">Manage</th>
                               </tr>
@@ -961,7 +980,7 @@ export default function QuotationBuilder({
                               {groupedItems.map((item) => {
                                 // Find overall index of this item in prime catalog
                                 const primeIndex = items.findIndex(it => it.id === item.id);
-                                const discountedRate = item.rate * (1 - masterDiscountPercent / 100);
+                                const discountedRate = item.rate * (1 - effDiscOf(item) / 100);
                                 const finalAmount = item.qty * discountedRate;
 
                                 return (
@@ -1054,6 +1073,18 @@ export default function QuotationBuilder({
                                         value={item.rate}
                                         onChange={(e) => handleUpdateItem(item.id, { rate: Math.max(0, parseFloat(e.target.value) || 0) })}
                                         className="w-14 border border-slate-200 p-0.5 rounded text-2xs font-mono text-right font-semibold font-bold"
+                                      />
+                                    </td>
+
+                                    <td className="py-1 px-2 text-center">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={item.discountPercent}
+                                        onChange={(e) => handleUpdateItem(item.id, { discountPercent: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                                        className="w-11 border border-slate-200 p-0.5 rounded text-2xs text-center font-mono font-bold"
+                                        placeholder={masterDiscountPercent ? String(masterDiscountPercent) : '0'}
                                       />
                                     </td>
 

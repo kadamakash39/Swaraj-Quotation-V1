@@ -47,8 +47,9 @@ export default function Dashboard({
   const calculateQuotationTotal = (q: Quotation) => {
     let subtotal = 0;
     q.items.forEach(item => {
-      // Apply master discount
-      const discountedRate = item.rate * (1 - q.masterDiscountPercent / 100);
+      // Apply item-level discount, falling back to master discount
+      const activeDisc = (item.discountPercent && item.discountPercent > 0 ? item.discountPercent : q.masterDiscountPercent) || 0;
+      const discountedRate = item.rate * (1 - activeDisc / 100);
       subtotal += item.qty * discountedRate;
     });
 
