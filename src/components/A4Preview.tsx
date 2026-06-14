@@ -1,7 +1,8 @@
 import React, { useState, FormEvent } from 'react';
 import { 
   Printer, ArrowLeft, Mail, Phone, ExternalLink, Calendar, 
-  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode 
+  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode,
+  Download, Loader2
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
 
@@ -86,6 +87,7 @@ export default function A4Preview({
   const [subjectMsg, setSubjectMsg] = useState('');
   const [bodyText, setBodyText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const matchedCustomer = customers.find(c => c.id === quotation.customerId);
 
@@ -113,6 +115,56 @@ export default function A4Preview({
   // Trigger web system printing
   const triggerPrint = () => {
     window.print();
+  };
+
+  // Dynamically compile & download document canvas block as custom named PDF file
+  const handleDownloadPDF = () => {
+    const element = document.getElementById('swraj-a4-pdf-canvas');
+    if (!element) {
+      alert("Error: Print canvas selector could not be acquired.");
+      return;
+    }
+
+    setIsDownloadingPdf(true);
+
+    const opt = {
+      margin: [10, 10, 10, 10], // 10mm margins for a beautiful, spacious and balanced A4 output
+      filename: `Quotation_${quotation.id}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { 
+        scale: 2.2, // Generates ultra crisp high density images and scaling text
+        useCORS: true, 
+        logging: false,
+        allowTaint: true,
+        backgroundColor: '#ffffff'
+      },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    const runHtml2Pdf = (html2pdfLib: any) => {
+      html2pdfLib().from(element).set(opt).save().then(() => {
+        setIsDownloadingPdf(false);
+      }).catch((err: any) => {
+        console.error("PDF generation failure:", err);
+        alert("Failed to generate PDF automatically. Please try the printer option instead.");
+        setIsDownloadingPdf(false);
+      });
+    };
+
+    if ((window as any).html2pdf) {
+      runHtml2Pdf((window as any).html2pdf);
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.onload = () => {
+        runHtml2Pdf((window as any).html2pdf);
+      };
+      script.onerror = () => {
+        alert("Could not load PDF engine from remote secure network source. Please use standard Print/Save Option.");
+        setIsDownloadingPdf(false);
+      };
+      document.body.appendChild(script);
+    }
   };
 
   // Open share dialogue logic
@@ -218,6 +270,19 @@ export default function A4Preview({
           </button>
 
           <button
+            onClick={handleDownloadPDF}
+            disabled={isDownloadingPdf}
+            className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 disabled:bg-sky-800 disabled:opacity-80 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
+          >
+            {isDownloadingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            Download PDF
+          </button>
+
+          <button
             onClick={() => handleOpenShare('WhatsApp')}
             className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer"
           >
@@ -249,10 +314,10 @@ export default function A4Preview({
           >
             {/* Custom high-visibility item layout table containing the repeating sections in the thead */}
             <div className="py-4">
-              <table className="w-full text-left text-[11px] border-collapse border border-slate-300 font-sans shadow-2xs">
+              <table className="w-full text-left text-[11px] border-collapse font-sans shadow-2xs">
                 <thead>
                   {/* Page Header Row - Repeats automatically on multi-page print */}
-                  <tr className="border-b border-slate-300">
+                  <tr className="border-none">
                     <td colSpan={10} className="p-0 border-none bg-white">
                       <div className="flex justify-between items-start pb-5 text-left">
                         <div className="flex items-start gap-3.5">
@@ -269,7 +334,7 @@ export default function A4Preview({
                           )}
                           <div>
                             <h1 className="text-lg font-extrabold tracking-tight text-slate-900 leading-tight mb-1">{companyProfile.name}</h1>
-                            <p className="text-[10px] text-slate-500 max-w-[320px] leading-relaxed">{companyProfile.address}</p>
+                            <p className="text-[10px] text-slate-550 max-w-[320px] leading-relaxed">{companyProfile.address}</p>
                             <p className="text-[10px] text-slate-550 font-medium">Email: {companyProfile.email}</p>
                             <p className="text-[10px] text-slate-550 font-medium">Mobile: {companyProfile.mobile}</p>
                           </div>
@@ -283,7 +348,7 @@ export default function A4Preview({
                   </tr>
 
                   {/* Billing Parties and metadata structure Row - Repeats automatically on multi-page print */}
-                  <tr className="border-b border-slate-300">
+                  <tr className="border-none">
                     <td colSpan={10} className="p-0 border-none bg-white">
                       <div className="grid grid-cols-2 gap-4 py-5 text-[11px] leading-normal font-sans">
                         <div className="space-y-0.5 text-left">
@@ -314,8 +379,8 @@ export default function A4Preview({
                   </tr>
 
                   {/* Item Columns Row */}
-                  <tr className="bg-[#1E3A8A] text-white border-b border-slate-300">
-                    <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
+                  <tr className="bg-[#1E3A8A] text-white border-y border-slate-300">
+                    <th className="p-1.5 w-[5%] text-center border-l border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Sr No</th>
                     <th className="p-1.5 w-[25%] text-left border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Description</th>
                     <th className="p-1.5 w-[25%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Item Image</th>
                     <th className="p-1.5 w-[8%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">HSN/SAC</th>
@@ -324,7 +389,7 @@ export default function A4Preview({
                     <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Rate</th>
                     <th className="p-1.5 w-[5%] text-center border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Disc %</th>
                     <th className="p-1.5 w-[9%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Net Rate</th>
-                    <th className="p-1.5 w-[8%] text-right font-bold uppercase tracking-tight text-[10px]">Amount</th>
+                    <th className="p-1.5 w-[8%] text-right border-r border-slate-300 font-bold uppercase tracking-tight text-[10px]">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="font-medium text-slate-750">
@@ -344,8 +409,8 @@ export default function A4Preview({
                       }
                       uniqueGroups.forEach(gName => {
                         renderGroups.push({
-                          name: gName,
-                          items: quotation.items.filter(item => (item.groupName || '').trim() === gName)
+                           name: gName,
+                           items: quotation.items.filter(item => (item.groupName || '').trim() === gName)
                         });
                       });
 
@@ -365,7 +430,7 @@ export default function A4Preview({
 
                             return (
                               <tr key={item.id} className="align-middle border-b border-slate-200 hover:bg-slate-50/40">
-                                <td className="p-1 text-center border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
+                                <td className="p-1 text-center border-l border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
                                 <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-900 leading-snug">{item.description}</td>
                                 <td className="p-2 border-r border-slate-300 text-center">
                                   {item.image ? (
@@ -394,7 +459,7 @@ export default function A4Preview({
                                 <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono text-slate-700 font-semibold">
                                   ₹{discountedRate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
-                                <td className="p-1 pr-1.5 text-right font-mono font-bold text-slate-900">
+                                <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono font-bold text-slate-900">
                                   ₹{finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                               </tr>
@@ -402,17 +467,17 @@ export default function A4Preview({
                           })}
                           {/* Group Subtotal Row */}
                           <tr className="bg-slate-100/40 border-b border-slate-350 font-bold text-[9px] no-print-background select-none">
-                            <td colSpan={2} className="py-2 px-3 text-slate-600 uppercase text-right tracking-wider border-r border-slate-200">
+                            <td colSpan={2} className="py-2 px-3 text-slate-600 uppercase text-right tracking-wider border-l border-r border-slate-300">
                               {group.name} Subtotal:
                             </td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1 border-r border-slate-200"></td>
-                            <td className="p-1.5 pr-2.5 text-right font-mono text-[#1E3A8A] font-black bg-slate-100/60 shadow-inner">
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1 border-r border-slate-300"></td>
+                            <td className="p-1.5 pr-2.5 text-right border-r border-slate-300 font-mono text-[#1E3A8A] font-black bg-slate-100/60 shadow-inner">
                               ₹{group.items.reduce((sum, item) => {
                                 const activeDisc = quotation.masterDiscountPercent;
                                 const discountedRate = item.rate * (1 - activeDisc / 100);
@@ -433,7 +498,7 @@ export default function A4Preview({
                       return (
                         <tr key={item.id} className="align-middle border-b border-slate-200 hover:bg-slate-50/40">
                           {/* Continuous Sr No */}
-                          <td className="p-1 text-center border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
+                          <td className="p-1 text-center border-l border-r border-slate-300 font-mono font-bold text-slate-500 text-[10px]">{idx + 1}</td>
                           
                           {/* Item Description */}
                           <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-900 leading-snug">
@@ -482,7 +547,7 @@ export default function A4Preview({
                           </td>
 
                           {/* Gross Amount */}
-                          <td className="p-1 pr-1.5 text-right font-mono font-bold text-slate-900">
+                          <td className="p-1 pr-1.5 text-right border-r border-slate-300 font-mono font-bold text-slate-900">
                             ₹{finalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                         </tr>
