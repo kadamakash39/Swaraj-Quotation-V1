@@ -155,7 +155,7 @@ export default function A4Preview({
           for (let i = 0; i < pageElements.length; i++) {
             const pageEl = pageElements[i] as HTMLElement;
             const canvas = await html2canvas(pageEl, {
-              scale: 2.2, // Generates ultra-crisp, high-density assets for professional font rendering
+              scale: 2.0, // Generates ultra-crisp, high-density assets for professional font rendering
               useCORS: true,
               allowTaint: false,
               backgroundColor: '#ffffff',
@@ -208,7 +208,7 @@ export default function A4Preview({
         for (let i = 0; i < pageElements.length; i++) {
           const pageEl = pageElements[i] as HTMLElement;
           const canvas = await html2canvas(pageEl, {
-            scale: 2.2,
+            scale: 2.0,
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
@@ -453,6 +453,49 @@ export default function A4Preview({
 
   const pages = getPages();
 
+  // Helper to download a single page by index as a high-resolution JPG
+  const handleDownloadSinglePageJPG = async (idx: number) => {
+    let imgSrc = flatPageImages[idx];
+    if (!imgSrc) {
+      const pageElements = document.querySelectorAll('.a4-page-print-source');
+      const pageEl = pageElements[idx] as HTMLElement;
+      if (pageEl) {
+        try {
+          const canvas = await html2canvas(pageEl, {
+            scale: 2.0,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            scrollX: 0,
+            scrollY: 0
+          });
+          imgSrc = canvas.toDataURL('image/jpeg', 0.98);
+          
+          // Update cache
+          const copy = [...flatPageImages];
+          copy[idx] = imgSrc;
+          setFlatPageImages(copy);
+        } catch (e) {
+          console.error("Manual JPEG capture failed for page:", idx, e);
+          alert("Failed to render page image.");
+          return;
+        }
+      }
+    }
+    
+    if (imgSrc) {
+      const link = document.createElement('a');
+      link.href = imgSrc;
+      link.download = `Quotation_${quotation.id}_Page_${idx + 1}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      alert("Page container not found to capture.");
+    }
+  };
+
   // Download quotation page-by-page in high-resolution JPG format
   const handleDownloadJPG = async () => {
     let imagesToUse = flatPageImages;
@@ -470,7 +513,7 @@ export default function A4Preview({
         const pageEl = pageElements[i] as HTMLElement;
         try {
           const canvas = await html2canvas(pageEl, {
-            scale: 2.2,
+            scale: 2.0,
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
@@ -554,10 +597,11 @@ export default function A4Preview({
             height: 297mm !important;
             min-height: 297mm !important;
             max-height: 297mm !important;
-            padding: 12mm 15mm !important;
+            padding: 12mm 15mm 24mm 15mm !important;
             margin: 0 auto !important;
             margin-bottom: 0mm !important;
             box-sizing: border-box !important;
+            position: relative !important;
             page-break-after: always !important;
             break-after: always !important;
             border: none !important;
@@ -619,7 +663,7 @@ export default function A4Preview({
           height: 297mm;
           min-height: 297mm;
           max-height: 297mm;
-          padding: 12mm 15mm;
+          padding: 12mm 15mm 24mm 15mm;
           margin: 0 auto;
           margin-bottom: 24px;
           box-sizing: border-box;
@@ -703,10 +747,22 @@ export default function A4Preview({
             {pages.map((page, pageIdx) => (
               <div 
                 key={pageIdx}
-                className="a4-page-print-source border border-slate-200 shadow-xl print:shadow-none print:border-none"
+                className="a4-page-print-source border border-slate-200 shadow-xl print:shadow-none print:border-none relative group"
               >
+                {/* On-screen floating individual page export option */}
+                <div className="absolute top-4 right-5 z-20 no-print opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <button
+                    onClick={() => handleDownloadSinglePageJPG(pageIdx)}
+                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-bold px-3.5 py-1.5 rounded-lg shadow-md cursor-pointer transition-all border border-indigo-700 hover:scale-[1.02]"
+                    title="Download this page image block"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download JPG (Page {pageIdx + 1})
+                  </button>
+                </div>
+
                 {/* Content block: aligned to top layout */}
-                <div className="space-y-4 flex-grow flex flex-col justify-start">
+                <div className="space-y-3.5 pb-[24mm] flex flex-col justify-start">
                   
                   {/* Dynamic Repeating Company Header (No borders as requested) */}
                   <div className="flex justify-between items-start pb-4 border-b border-slate-200 text-left">
@@ -767,7 +823,7 @@ export default function A4Preview({
 
                   {/* Dynamic Items Table */}
                   {page.rows.length > 0 && (
-                    <div className="py-1 flex-grow">
+                    <div className="py-1">
                       <table className="w-full text-left text-[11.5px] border-collapse font-sans border border-slate-300 rounded-lg overflow-hidden">
                         <thead>
                           {/* Column Headers */}
@@ -839,7 +895,7 @@ export default function A4Preview({
                                       <img 
                                         src={sanitizeSvgSrc(item.image)} 
                                         alt={item.description} 
-                                        className="h-28 w-28 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm"
+                                        className="h-24 w-24 object-contain bg-white p-1 mx-auto rounded-lg border border-slate-200 shadow-sm"
                                         crossOrigin="anonymous"
                                         referrerPolicy="no-referrer"
                                       />
@@ -1045,6 +1101,8 @@ export default function A4Preview({
                                   src={sanitizeSvgSrc(companyProfile.stampAndSignature || companyProfile.stamp)} 
                                   alt="Authorized Stamp & Seal" 
                                   className="max-h-20 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95" 
+                                  crossOrigin="anonymous"
+                                  referrerPolicy="no-referrer"
                                 />
                               ) : (
                                 <div className="text-[9px] text-slate-350 italic flex items-center justify-center h-full select-none font-bold">
@@ -1067,14 +1125,14 @@ export default function A4Preview({
 
                 </div>
 
-                {/* Company contact summary footer bottom aligned */}
-                <div className="pt-4 border-t border-slate-200 select-none avoid-page-break">
+                {/* Company contact summary footer bottom aligned absolute-locked */}
+                <div className="absolute bottom-[10mm] left-[15mm] right-[15mm] select-none avoid-page-break">
                   <div className="bg-slate-100 border border-slate-200 rounded-xl py-2 px-4 text-[9.1px] text-slate-650 flex justify-between items-center select-none font-sans shadow-3xs w-full">
-                    <span className="uppercase font-black tracking-wider leading-relaxed text-ellipsis overflow-hidden whitespace-nowrap max-w-[500px]">
+                    <span className="uppercase font-black tracking-wider leading-relaxed text-ellipsis overflow-hidden whitespace-nowrap max-w-[320px] md:max-w-[420px]">
                       {companyProfile.address ? companyProfile.address.replace(/\n/g, ' ') : ''}
                     </span>
                     <div className="text-right whitespace-nowrap font-bold text-slate-600 font-sans">
-                      Phone: {companyProfile.mobile} | Email: {companyProfile.email} | Page {pageIdx + 1} of {pages.length}
+                      Phone: {companyProfile.mobile} | Page {pageIdx + 1} of {pages.length}
                     </div>
                   </div>
                 </div>
@@ -1151,47 +1209,10 @@ export default function A4Preview({
 
             <div className="space-y-1.5 pt-1">
               {pages.map((_, idx) => {
-                const hasImgAvailable = flatPageImages[idx];
                 return (
                   <button
                     key={idx}
-                    onClick={async () => {
-                      let imgSrc = hasImgAvailable;
-                      if (!imgSrc) {
-                        // Dynamically compute on-demand if not pre-rendered
-                        const pageElements = document.querySelectorAll('.a4-page-print-source');
-                        const pageEl = pageElements[idx] as HTMLElement;
-                        if (pageEl) {
-                          try {
-                            const canvas = await html2canvas(pageEl, {
-                              scale: 2.2,
-                              useCORS: true,
-                              allowTaint: false,
-                              backgroundColor: '#ffffff',
-                              logging: false,
-                              scrollX: 0,
-                              scrollY: 0
-                            });
-                            imgSrc = canvas.toDataURL('image/jpeg', 0.98);
-                            // Update our state cache for index
-                            const copy = [...flatPageImages];
-                            copy[idx] = imgSrc;
-                            setFlatPageImages(copy);
-                          } catch (e) {
-                            alert("Failed to render page image.");
-                            return;
-                          }
-                        }
-                      }
-                      if (imgSrc) {
-                        const link = document.createElement('a');
-                        link.href = imgSrc;
-                        link.download = `Quotation_${quotation.id}_Page_${idx + 1}.jpg`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                      }
-                    }}
+                    onClick={() => handleDownloadSinglePageJPG(idx)}
                     className="w-full flex items-center justify-between bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-350 text-slate-700 hover:text-slate-900 px-3 py-2 rounded-lg text-[11px] font-bold shadow-3xs cursor-pointer transition-all"
                   >
                     <span>Page {idx + 1} Image Block</span>
