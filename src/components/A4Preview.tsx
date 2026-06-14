@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 
 // Convert numbers into Words in standard Indian Rupees / Paise formatting
 export function convertNumberToWords(num: number): string {
@@ -697,6 +697,20 @@ export default function A4Preview({
         </div>
 
         <div className="flex flex-wrap gap-2.5">
+          <button
+            onClick={triggerPrint}
+            disabled={isFlattening}
+            className="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:opacity-80 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
+            title={isFlattening ? 'Preparing print-ready pages...' : 'Print exactly like the web preview (A4, page by page)'}
+          >
+            {isFlattening ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Printer className="w-4 h-4" />
+            )}
+            Print
+          </button>
+
           <button
             onClick={handleDownloadPDF}
             disabled={isDownloadingPdf}
