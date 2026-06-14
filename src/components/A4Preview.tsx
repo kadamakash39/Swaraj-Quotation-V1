@@ -80,40 +80,24 @@ interface A4PreviewProps {
 // Convert raw SVG data URIs into base64 encoded strings to eliminate browser loading issues and canvas taint exceptions
 const sanitizeSvgSrc = (src: string) => {
   if (!src) return src;
-  
-  // If it's already a base64 encoded svg, return as is
   if (src.startsWith('data:image/svg+xml;base64,')) {
     return src;
   }
-
-  // If it's a representation of SVG (either utf8 or plain XML URL-encoded)
-  if (src.startsWith('data:image/svg+xml')) {
-    let rawContent = '';
-    if (src.startsWith('data:image/svg+xml;utf8,')) {
-      rawContent = src.substring('data:image/svg+xml;utf8,'.length);
-    } else {
-      const parts = src.split(',');
-      if (parts.length > 1) {
-        rawContent = parts[1];
+  if (src.includes('data:image/svg+xml')) {
+    try {
+      let rawXml = src;
+      const commaIdx = src.indexOf(',');
+      if (commaIdx !== -1) {
+        rawXml = src.substring(commaIdx + 1);
       }
-    }
-
-    if (rawContent) {
-      try {
-        // Try decoding first to convert any %23, %20, etc. into real characters like # and spaces
-        const decoded = decodeURIComponent(rawContent);
-        // Base64 encode the final raw XML UTF-8 string
-        const base64 = btoa(unescape(encodeURIComponent(decoded)));
-        return 'data:image/svg+xml;base64,' + base64;
-      } catch (e) {
-        try {
-          // Fallback if decodeURIComponent fails
-          const base64 = btoa(unescape(encodeURIComponent(rawContent)));
-          return 'data:image/svg+xml;base64,' + base64;
-        } catch (e2) {
-          return src;
-        }
-      }
+      // Decode %xx references to actual XML characters safely
+      const decodedXml = decodeURIComponent(rawXml);
+      // Construct perfect base64 representation of the SVG XML string
+      const base64 = btoa(unescape(encodeURIComponent(decodedXml.trim())));
+      return 'data:image/svg+xml;base64,' + base64;
+    } catch (e) {
+      console.warn("SVG sanitize failed:", e);
+      return src;
     }
   }
   return src;
@@ -132,6 +116,8 @@ export default function A4Preview({
   const [bodyText, setBodyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [flatPageImages, setFlatPageImages] = useState<string[]>([]);
+  const [isFlattening, setIsFlattening] = useState<boolean>(true);
 
   const matchedCustomer = customers.find(c => c.id === quotation.customerId);
 
@@ -156,60 +142,104 @@ export default function A4Preview({
   // Render continuous Terms numbering properly
   const activeTerms = quotation.terms.filter(t => t.checked);
 
+  // Background worker to secure and flatten our pages into absolute layout-locked high-resolution page-by-page images 
+  React.useEffect(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      if (!active) return;
+      setIsFlattening(true);
+      try {
+        const pageElements = document.querySelectorAll('.a4-page-print-source');
+        if (pageElements && pageElements.length > 0) {
+          const images: string[] = [];
+          for (let i = 0; i < pageElements.length; i++) {
+            const pageEl = pageElements[i] as HTMLElement;
+            const canvas = await html2canvas(pageEl, {
+              scale: 2.2, // Generates ultra-crisp, high-density assets for professional font rendering
+              useCORS: true,
+              allowTaint: false,
+              backgroundColor: '#ffffff',
+              logging: false,
+              scrollX: 0,
+              scrollY: 0
+            });
+            const imgData = canvas.toDataURL('image/jpeg', 0.98);
+            images.push(imgData);
+          }
+          if (active) {
+            setFlatPageImages(images);
+          }
+        }
+      } catch (err) {
+        console.error("Background text-flattening engine exception:", err);
+      } finally {
+        if (active) {
+          setIsFlattening(false);
+        }
+      }
+    }, 1200); // Small delay to guarantee complete browser CSS rendering & fonts application
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [quotation, companyProfile]);
+
   // Trigger web system printing
   const triggerPrint = () => {
     window.print();
   };
 
-  // Dynamically compile & download document canvas block as custom named PDF file
+  // Instantly package pre-rendered high-res layout-locked images inside client-side container, bypassing sandbox limits
   const handleDownloadPDF = async () => {
     setIsDownloadingPdf(true);
 
     try {
-      // Find all custom styled A4 physical elements
-      const pageElements = document.querySelectorAll('.a4-page-print');
-      
-      if (!pageElements || pageElements.length === 0) {
-        throw new Error("No layout pages found with class '.a4-page-print'.");
+      let imagesToUse = flatPageImages;
+
+      // Safe fallback if pre-render isn't populated or was interrupted 
+      if (imagesToUse.length === 0) {
+        const pageElements = document.querySelectorAll('.a4-page-print-source');
+        if (!pageElements || pageElements.length === 0) {
+          throw new Error("No layout pages found with class '.a4-page-print-source'.");
+        }
+        
+        const captured: string[] = [];
+        for (let i = 0; i < pageElements.length; i++) {
+          const pageEl = pageElements[i] as HTMLElement;
+          const canvas = await html2canvas(pageEl, {
+            scale: 2.2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            scrollX: 0,
+            scrollY: 0
+          });
+          captured.push(canvas.toDataURL('image/jpeg', 0.98));
+        }
+        imagesToUse = captured;
+        setFlatPageImages(captured);
       }
 
-      // Initialize jsPDF A4 portrait document
+      // Initialize portrait jsPDF A4 document
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4'
       });
 
-      for (let i = 0; i < pageElements.length; i++) {
-        const pageEl = pageElements[i] as HTMLElement;
-
-        // Render high density canvas without hardcoding parent window size which can crash in responsive frame sandboxes
-        const canvas = await html2canvas(pageEl, {
-          scale: 2.0, // perfect crispness for premium font rendering & logo assets
-          useCORS: true,
-          allowTaint: false, // Prevents security errors on canvas.toDataURL
-          backgroundColor: '#ffffff',
-          logging: false,
-          scrollX: 0,
-          scrollY: 0
-        });
-
-        const imgData = canvas.toDataURL('image/jpeg', 0.98);
-
-        // Add page if other than first page
+      for (let i = 0; i < imagesToUse.length; i++) {
         if (i > 0) {
           pdf.addPage('a4', 'portrait');
         }
-
-        pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+        pdf.addImage(imagesToUse[i], 'JPEG', 0, 0, 210, 297);
       }
 
       pdf.save(`Quotation_${quotation.id}.pdf`);
     } catch (err: any) {
       console.error("PDF generation failure:", err);
-      const errMsg = err?.message || err?.toString() || "Unknown security context";
-      alert(`Automated PDF render was constrained by browser sandbox policy (${errMsg}).\n\nNo worries! Clicking OK will launch your system's print center with perfect A4 alignment. Simply select 'Save as PDF' from your printer destination list.`);
-      window.print();
+      alert("Failed to automatically export secure PDF. Please run standard Print (Ctrl+P) and select 'Save as PDF' instead.");
     } finally {
       setIsDownloadingPdf(false);
     }
@@ -413,10 +443,15 @@ export default function A4Preview({
   const pages = getPages();
 
   return (
-    <div className="space-y-6 flex flex-col min-h-screen">
+    <div className={`space-y-6 flex flex-col min-h-screen ${flatPageImages.length > 0 ? 'has-flat-images' : ''}`}>
       
       {/* Scope print inline overrides to force full background print graphics and clean page-by-page sizing */}
       <style>{`
+        /* By default on screens, hide the print-flat-container */
+        .print-flat-container {
+          display: none;
+        }
+
         @media print {
           @page {
             size: A4 portrait;
@@ -431,6 +466,15 @@ export default function A4Preview({
           .no-print {
             display: none !important;
           }
+
+          /* When flat images are active, hide HTML container and show only pre-rendered layout-locked JPEGs */
+          .has-flat-images #swraj-a4-pdf-canvas {
+            display: none !important;
+          }
+          .has-flat-images .print-flat-container {
+            display: block !important;
+          }
+
           #swraj-a4-pdf-canvas {
             border: none !important;
             box-shadow: none !important;
@@ -440,7 +484,9 @@ export default function A4Preview({
             max-width: 100% !important;
             background: #ffffff !important;
           }
-          .a4-page-print {
+          
+          /* Source fallback rendering sizes */
+          .a4-page-print-source {
             width: 210mm !important;
             height: 297mm !important;
             min-height: 297mm !important;
@@ -455,11 +501,41 @@ export default function A4Preview({
             box-shadow: none !important;
             background: #ffffff !important;
           }
-          .a4-page-print:last-child {
+          .a4-page-print-source:last-child {
             page-break-after: avoid !important;
             break-after: avoid !important;
             margin-bottom: 0mm !important;
           }
+
+          /* Flat exact-dimensions rendering sizes */
+          .a4-page-print-flat {
+            width: 210mm !important;
+            height: 297mm !important;
+            min-height: 297mm !important;
+            max-height: 297mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            page-break-after: always !important;
+            break-after: always !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+          }
+          .a4-page-print-flat:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+          .a4-page-print-flat img {
+            width: 210mm !important;
+            height: 297mm !important;
+            display: block !important;
+            object-fit: contain !important;
+          }
+
           tr {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
@@ -475,7 +551,7 @@ export default function A4Preview({
           page-break-inside: avoid !important;
         }
 
-        .a4-page-print {
+        .a4-page-print-source {
           width: 210mm;
           height: 297mm;
           min-height: 297mm;
@@ -492,7 +568,7 @@ export default function A4Preview({
           overflow: hidden;
           color: #1e293b;
         }
-        .a4-page-print:last-child {
+        .a4-page-print-source:last-child {
           margin-bottom: 0;
         }
       `}</style>
@@ -556,7 +632,7 @@ export default function A4Preview({
             {pages.map((page, pageIdx) => (
               <div 
                 key={pageIdx}
-                className="a4-page-print border border-slate-200 shadow-xl print:shadow-none print:border-none"
+                className="a4-page-print-source border border-slate-200 shadow-xl print:shadow-none print:border-none"
               >
                 {/* Content block: aligned to top layout */}
                 <div className="space-y-4 flex-grow flex flex-col justify-start">
@@ -954,6 +1030,38 @@ export default function A4Preview({
               <span>Verify that standard printer **Background Graphics** checkbox is checked before trigger signature prints.</span>
             </p>
           </div>
+
+          {/* Secure Page Flattening Status Badge & Alert */}
+          <div className="bg-slate-50 border border-slate-250/70 rounded-xl p-4 mt-2 space-y-3.5 text-left">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className={`w-5 h-5 ${isFlattening ? 'text-amber-500 animate-pulse' : 'text-emerald-600'}`} />
+              <span className="font-extrabold text-slate-900 text-xs tracking-tight">Print Security Engine</span>
+            </div>
+
+            {isFlattening ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-slate-500 text-[10.5px] font-semibold">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                  <span>Securing & flattening pages...</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-500 animate-[pulse_1.5s_infinite] w-[80%]" />
+                </div>
+                <p className="text-[9.5px] text-slate-400 font-medium leading-relaxed">
+                  Rasterizing letterheads and custom graphics to create tamper-proof physical layouts.
+                </p>
+              </div>
+            ) : flatPageImages.length > 0 ? (
+              <div className="space-y-1.5 text-slate-700 text-[11px] leading-relaxed">
+                <p className="font-extrabold text-emerald-600 text-xs">✓ A4 Layout Flattened & Locked</p>
+                <p className="text-[10px] text-slate-505 font-medium leading-normal">
+                  All pages are flattened into secure, layout-locked high-resolution JPEGs. No text selection is allowed, and no document contents can be altered or extracted at print-time.
+                </p>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400 italic">Waiting for viewport calculation...</p>
+            )}
+          </div>
         </div>
 
       </div>
@@ -1042,6 +1150,22 @@ export default function A4Preview({
             </form>
 
           </div>
+        </div>
+      )}
+
+      {/* Flat page images for perfect printed output (No text-selection, fully flattened & tamper-proof) */}
+      {flatPageImages.length > 0 && (
+        <div className="print-flat-container print:block">
+          {flatPageImages.map((imgSrc, pageIdx) => (
+            <div key={pageIdx} className="a4-page-print-flat">
+              <img 
+                src={imgSrc} 
+                alt={`Quotation Page ${pageIdx + 1}`} 
+                crossOrigin="anonymous" 
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          ))}
         </div>
       )}
 
