@@ -435,66 +435,91 @@ export default function A4Preview({
   return (
     <div className="space-y-6">
       
-      {/* Scope print inline overrides to force full background print graphics and clean sizing */}
+      {/*
+        Authoritative print stylesheet (single source of truth).
+        Uses the visibility-isolation pattern so the printed output is an
+        exact 1:1 match of the on-screen A4 pages, with no app chrome,
+        no double margins, and no trailing blank page.
+      */}
       <style>{`
         @media print {
+          /* A4 sheet with zero page margin; all spacing lives inside .print-page */
           @page {
             size: A4 portrait;
-            margin: 0 !important;
+            margin: 0;
           }
+
           html, body {
             margin: 0 !important;
             padding: 0 !important;
-            float: none !important;
             width: 210mm !important;
-            height: 297mm !important;
             background: #ffffff !important;
             color: #000000 !important;
-            overflow: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          #root {
-            padding: 0 !important;
-            margin: 0 !important;
+
+          /* Hide the entire app, then reveal ONLY the A4 canvas */
+          body * {
+            visibility: hidden !important;
           }
-          .no-print {
-            display: none !important;
+          #swraj-a4-pdf-canvas,
+          #swraj-a4-pdf-canvas * {
+            visibility: visible !important;
           }
+
+          /* Lift the canvas out of the dashboard layout and pin to the page origin */
           #swraj-a4-pdf-canvas {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
             border: none !important;
             box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: 210mm !important;
-            background: transparent !important;
+            background: #ffffff !important;
             display: block !important;
           }
+
+          /* Each sheet = one physical A4 page */
           .print-page {
             width: 210mm !important;
             height: 297mm !important;
             min-height: 297mm !important;
             max-height: 297mm !important;
-            page-break-after: always !important;
-            page-break-before: auto !important;
-            page-break-inside: avoid !important;
             box-sizing: border-box !important;
             margin: 0 !important;
             padding: 12mm 15mm 12mm 15mm !important;
             border: none !important;
             box-shadow: none !important;
+            border-radius: 0 !important;
             background: #ffffff !important;
             display: flex !important;
             flex-direction: column !important;
-            justify-content: space-between !important;
+            justify-content: flex-start !important;
+            overflow: hidden !important;
             position: relative !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+            page-break-after: always;
+            break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
-          #swraj-a4-pdf-canvas .print-page img {
+
+          /* No forced break after the final sheet -> prevents an empty trailing page */
+          .print-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
+
+          #swraj-a4-pdf-canvas img {
             max-height: 120px !important;
             width: auto !important;
             object-fit: contain !important;
           }
-          .no-print-background {
+
+          /* Force every color/background/border to render in print */
+          #swraj-a4-pdf-canvas * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -560,7 +585,6 @@ export default function A4Preview({
                 key={page.pageNumber}
                 className="print-page w-[210mm] h-[297mm] min-h-[297mm] max-h-[297mm] mx-auto bg-white border border-slate-200 p-[12mm_15mm_12mm_15mm] font-sans shadow-lg text-slate-800 tracking-tight relative flex flex-col justify-start"
                 style={{
-                  pageBreakAfter: 'always',
                   marginBottom: pIdx === pages.length - 1 ? '0' : '24px',
                 }}
               >
