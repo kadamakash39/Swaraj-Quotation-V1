@@ -155,13 +155,13 @@ function paginateQuotation(
   
   // Available height limit for layout blocks inside A4 portrait inside safe print bounds
   const totalA4Height = 930; 
-  const headerHeight = 125;
+  const headerHeight = 145;
   const billingInfoHeight = 115;
   const tableHeaderHeight = 36;
   const termHeaderHeight = 25;
   const specHeaderHeight = 25;
-  const financialTotalsHeight = 145;
-  const signatureHeight = 135;
+  const financialTotalsHeight = 165;
+  const signatureHeight = 205;
 
   let currentPageIndex = 0;
   
@@ -234,12 +234,15 @@ function paginateQuotation(
         heightUsed += termHeaderHeight;
         termSectionHeaderAdded = true;
         
+        let pageTermsPackedCount = 0;
         while (termCursor < activeTerms.length) {
-          const tHeight = 20; // safe single term points height
+          const isNewRow = (pageTermsPackedCount % 2 === 0);
+          const tHeight = isNewRow ? 20 : 0;
           if (heightUsed + tHeight <= totalA4Height) {
             pageTermIndices.push(termCursor);
             heightUsed += tHeight;
             termCursor++;
+            pageTermsPackedCount++;
           } else {
             break;
           }
@@ -260,12 +263,15 @@ function paginateQuotation(
         heightUsed += specHeaderHeight;
         specSectionHeaderAdded = true;
         
+        let pageSpecsPackedCount = 0;
         while (specCursor < activeSpecs.length) {
-          const sHeight = 20; // safe single spec points height
+          const isNewRow = (pageSpecsPackedCount % 2 === 0);
+          const sHeight = isNewRow ? 20 : 0;
           if (heightUsed + sHeight <= totalA4Height) {
             pageSpecIndices.push(specCursor);
             heightUsed += sHeight;
             specCursor++;
+            pageSpecsPackedCount++;
           } else {
             break;
           }
@@ -490,7 +496,7 @@ export default function A4Preview({
             print-color-adjust: exact !important;
           }
           #swraj-a4-pdf-canvas .print-page img {
-            max-height: 120px !important;
+            max-height: 165px !important;
             width: auto !important;
             object-fit: contain !important;
           }
@@ -569,31 +575,31 @@ export default function A4Preview({
                 <div className="flex flex-col">
                   
                   {/* Page Header - Identical full branding header on all pages */}
-                  <div className="flex justify-between items-start border-b border-slate-300 pb-3 mb-3 shrink-0">
-                    <div className="flex items-start gap-1">
+                  <div className="flex justify-between items-center border-b border-slate-300 pb-3 mb-3 shrink-0">
+                    <div className="flex items-center gap-3">
                       {!companyProfile.logo && (
-                        <span className="font-extrabold text-[#1E3A8A] text-xl select-none mr-2">{'{LOGO}'}</span>
+                        <span className="font-black text-[#1E3A8A] text-3xl select-none mr-2">{'{LOGO}'}</span>
                       )}
                       {companyProfile.logo && (
                         <img 
                           src={companyProfile.logo} 
                           alt="Company Logo" 
-                          className="w-18 h-18 object-contain rounded border border-slate-100 mr-2.5 shrink-0" 
+                          className="w-24 h-24 object-contain rounded border border-slate-100 mr-2 shrink-0" 
                         />
                       )}
                       <div className="text-left font-sans">
-                        <h1 className="text-xl font-black tracking-tight text-slate-900 leading-tight mb-1 text-left uppercase">
+                        <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-1.5 text-left uppercase">
                           {companyProfile.name}
                         </h1>
-                        <p className="text-[9px] text-slate-500 max-w-[340px] leading-snug text-left">{companyProfile.address}</p>
-                        <p className="text-[9px] text-slate-555 font-medium font-sans text-left">
+                        <p className="text-[10px] text-slate-600 max-w-[360px] leading-snug text-left font-bold">{companyProfile.address}</p>
+                        <p className="text-[10px] text-slate-700 font-bold font-sans text-left mt-0.5">
                           Email: {companyProfile.email} | Mobile: {companyProfile.mobile}
                         </p>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <h2 className="text-xl font-black text-[#1E3A8A] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
+                      <h2 className="text-2xl font-black text-[#1E3A8A] tracking-widest font-sans leading-none uppercase">QUOTATION</h2>
                       {page.pageNumber > 1 && (
                         <span className="font-mono text-[9px] font-bold text-slate-500 mt-1 block text-right">
                           Ref: {quotation.id}
@@ -803,40 +809,40 @@ export default function A4Preview({
 
                         {/* Right Column: Totals details table with decreased line spacing */}
                         <div className="flex flex-col justify-start">
-                          <div className="w-full max-w-[240px] ml-auto space-y-0.5 text-right text-slate-850 text-[10px] font-medium leading-tight font-sans">
-                            <h3 className="font-bold text-[#1E3A8A] text-right mb-1 text-[10px] uppercase tracking-wider">Totals</h3>
-                            <div className="flex justify-between border-b border-slate-100 py-0.5">
-                              <span className="text-slate-500 font-semibold font-medium">Subtotal:</span>
+                          <div className="w-full max-w-[240px] ml-auto space-y-0 text-right text-slate-850 text-[10px] font-medium leading-none font-sans">
+                            <h3 className="font-bold text-[#1E3A8A] text-right mb-1.5 text-[10px] uppercase tracking-wider">Totals</h3>
+                            <div className="flex justify-between border-b border-slate-100 py-[2px]">
+                              <span className="text-slate-500 font-semibold">Subtotal:</span>
                               <span className="font-bold text-slate-900">₹{grossSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                            <div className="flex justify-between border-b border-slate-100 py-0.5">
-                              <span className="text-slate-500 font-semibold font-medium">Discount:</span>
+                            <div className="flex justify-between border-b border-slate-100 py-[2px]">
+                              <span className="text-slate-500 font-semibold">Discount:</span>
                               <span className="font-bold text-slate-700">₹{totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                            <div className="flex justify-between border-b border-dashed border-slate-350 py-0.5 uppercase text-slate-900">
+                            <div className="flex justify-between border-b border-dashed border-slate-350 py-[2px] uppercase text-slate-900">
                               <span className="font-bold text-[8.5px] text-slate-550">Taxable Amount:</span>
                               <span className="font-extrabold text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
 
                             {isLocal ? (
                               <>
-                                <div className="flex justify-between border-b border-slate-100 py-0.5 text-slate-600">
+                                <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
                                   <span>CGST 9%:</span>
                                   <span className="font-semibold text-slate-800">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex justify-between border-b border-slate-100 py-0.5 text-slate-600">
+                                <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
                                   <span>SGST 9%:</span>
                                   <span className="font-semibold text-slate-800">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                               </>
                             ) : (
-                              <div className="flex justify-between border-b border-slate-100 py-0.5 text-slate-600">
+                              <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
                                   <span>IGST 18%:</span>
                                   <span className="font-semibold text-slate-800">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                             )}
 
-                            <div className="flex justify-between border-t border-slate-400 pt-1 font-black text-[10.5px] text-[#1E3A8A] uppercase tracking-wider">
+                            <div className="flex justify-between border-t border-slate-400 pt-[3px] font-black text-[10.5px] text-[#1E3A8A] uppercase tracking-wider">
                               <span>GRAND TOTAL:</span>
                               <span>₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
@@ -889,17 +895,17 @@ export default function A4Preview({
                   {/* Signature box stamp - Align Right below items */}
                   {page.hasSignature && (
                     <div className="flex justify-end pt-3 w-full animate-fade-in">
-                      <div className="border border-slate-300 rounded-xl p-3 w-full max-w-[320px] bg-slate-50/15 shadow-3xs flex flex-col items-center justify-between text-center space-y-1.5 h-[155px] overflow-hidden">
+                      <div className="border border-slate-300 rounded-xl p-3 w-full max-w-[340px] bg-slate-50/15 shadow-3xs flex flex-col items-center justify-between text-center space-y-1.5 h-[185px] overflow-hidden">
                         <div className="text-[9px] font-black text-slate-700 uppercase tracking-wide leading-none">
                           FOR {companyProfile.name.toUpperCase()}
                         </div>
                         
-                        <div className="h-24 flex items-center justify-center w-full relative">
+                        <div className="h-32 flex items-center justify-center w-full relative">
                           {companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
                             <img 
                               src={companyProfile.stampAndSignature || companyProfile.stamp} 
                               alt="Authorized Stamp & Seal" 
-                              className="max-h-24 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95 transition-all" 
+                              className="max-h-32 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95 transition-all" 
                             />
                           ) : (
                             <div className="text-[8px] text-slate-300 italic flex items-center justify-center h-full select-none leading-none">
