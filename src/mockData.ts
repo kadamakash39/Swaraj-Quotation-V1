@@ -136,12 +136,57 @@ export const DEFAULT_MATERIAL_SPECS: MaterialSpecs = [
 ];
 
 export const DEFAULT_BANK_DETAILS: BankDetails = {
-  accountName: 'Swaraj Furniture Pvt Ltd',
-  accountNo: '08810500015125',
-  ifsc: 'BARB0BARAMA',
-  bankBranch: 'Baramati MIDC Road Branch - Bank of Baroda',
-  showInQuotation: true
+  showInQuotation: true,
+  accounts: [
+    {
+      id: 'bank-1',
+      accountName: 'Swaraj Furniture Pvt Ltd',
+      accountNo: '08810500015125',
+      accountType: 'Current',
+      ifsc: 'BARB0BARAMA',
+      bankBranch: 'Baramati MIDC Road Branch - Bank of Baroda'
+    }
+  ]
 };
+
+// Normalizes any stored/legacy bank details shape into the current multi-account structure.
+export function normalizeBankDetails(input: any): BankDetails {
+  // Already in new shape
+  if (input && Array.isArray(input.accounts)) {
+    return {
+      showInQuotation: input.showInQuotation !== false,
+      accounts: input.accounts.map((a: any, i: number) => ({
+        id: a.id || `bank-${Date.now()}-${i}`,
+        accountName: a.accountName || '',
+        accountNo: a.accountNo || '',
+        accountType: a.accountType || 'Current',
+        ifsc: a.ifsc || '',
+        bankBranch: a.bankBranch || ''
+      }))
+    };
+  }
+  // Legacy single-account shape -> wrap into one account
+  if (input && (input.accountName || input.accountNo || input.ifsc || input.bankBranch)) {
+    return {
+      showInQuotation: input.showInQuotation !== false,
+      accounts: [
+        {
+          id: 'bank-1',
+          accountName: input.accountName || '',
+          accountNo: input.accountNo || '',
+          accountType: input.accountType || 'Current',
+          ifsc: input.ifsc || '',
+          bankBranch: input.bankBranch || ''
+        }
+      ]
+    };
+  }
+  // Empty / undefined -> sensible default copy
+  return {
+    showInQuotation: input?.showInQuotation !== false,
+    accounts: DEFAULT_BANK_DETAILS.accounts.map(a => ({ ...a }))
+  };
+}
 
 export const DEFAULT_TERMS: TermCondition[] = [
   { id: 't1', text: 'Delivery: Within 21 to 30 days from layout approval & advance receiving.', checked: true },

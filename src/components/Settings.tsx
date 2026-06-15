@@ -4,7 +4,8 @@ import {
   HardHat, Shield, Landmark, Sparkles, Save, ToggleLeft, ToggleRight,
   Users, Key, Plus, Trash2, ShieldAlert
 } from 'lucide-react';
-import { CompanyProfile, MaterialSpecs, BankDetails, ERPUser, UserRole, TermCondition } from '../types';
+import { CompanyProfile, MaterialSpecs, BankDetails, BankAccount, ERPUser, UserRole, TermCondition } from '../types';
+import { normalizeBankDetails } from '../mockData';
 
 interface SettingsProps {
   companyProfile: CompanyProfile;
@@ -39,7 +40,31 @@ export default function Settings({
   const [specs, setSpecs] = useState<MaterialSpecs>(() => {
     return Array.isArray(materialSpecs) ? materialSpecs.map(s => ({ ...s })) : [];
   });
-  const [bank, setBank] = useState<BankDetails>({ ...bankDetails });
+  const [bank, setBank] = useState<BankDetails>(() => normalizeBankDetails(bankDetails));
+
+  // Bank account CRUD helpers
+  const handleAddBankAccount = () => {
+    const newAccount: BankAccount = {
+      id: `bank-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      accountName: '',
+      accountNo: '',
+      accountType: 'Current',
+      ifsc: '',
+      bankBranch: ''
+    };
+    setBank({ ...bank, accounts: [...bank.accounts, newAccount] });
+  };
+
+  const handleUpdateBankAccount = (id: string, updates: Partial<BankAccount>) => {
+    setBank({
+      ...bank,
+      accounts: bank.accounts.map(a => (a.id === id ? { ...a, ...updates } : a))
+    });
+  };
+
+  const handleRemoveBankAccount = (id: string) => {
+    setBank({ ...bank, accounts: bank.accounts.filter(a => a.id !== id) });
+  };
   const [terms, setTerms] = useState<TermCondition[]>(() => {
     return Array.isArray(masterTerms) ? masterTerms.map(t => ({ ...t })) : [];
   });
@@ -379,59 +404,100 @@ export default function Settings({
         {/* RHS Fields (Bank details & triggers) */}
         <div className="space-y-4">
           
-          {/* Card 3: Bank Account */}
+          {/* Card 3: Bank Accounts (one or more) */}
           <div className="bg-white rounded border border-slate-200 p-4 shadow-2xs space-y-3">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-display flex items-center gap-2 border-b border-slate-100 pb-1.5">
-              <Landmark className="w-4 h-4 text-slate-500" />
-              Corporate Banking Accounts
-            </h3>
-
-            <div className="space-y-2.5 text-xs font-medium">
-              <div className="space-y-0.5">
-                <label className="text-[9px] text-slate-400 uppercase font-bold">Account Holder Name</label>
-                <input
-                  type="text"
-                  required
-                  value={bank.accountName}
-                  onChange={(e) => setBank({ ...bank, accountName: e.target.value })}
-                  className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 text-xs"
-                />
-              </div>
-
-              <div className="space-y-0.5">
-                <label className="text-[9px] text-slate-400 uppercase font-bold">Account Number</label>
-                <input
-                  type="text"
-                  required
-                  value={bank.accountNo}
-                  onChange={(e) => setBank({ ...bank, accountNo: e.target.value })}
-                  className="w-full border border-slate-200 rounded p-1.5 focus:outline-none bg-slate-50/30 font-mono text-slate-900 text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-0.5">
-                  <label className="text-[9px] text-slate-400 uppercase font-bold">Bank IFSC Code</label>
-                  <input
-                    type="text"
-                    required
-                    value={bank.ifsc}
-                    onChange={(e) => setBank({ ...bank, ifsc: e.target.value.toUpperCase() })}
-                    className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 font-mono text-xs uppercase"
-                  />
-                </div>
-                <div className="space-y-0.5">
-                  <label className="text-[9px] text-slate-400 uppercase font-bold">Branch Location</label>
-                  <input
-                    type="text"
-                    required
-                    value={bank.bankBranch}
-                    onChange={(e) => setBank({ ...bank, bankBranch: e.target.value })}
-                    className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 text-xs"
-                  />
-                </div>
-              </div>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-display flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-slate-500" />
+                Corporate Banking Accounts
+              </h3>
+              <button
+                type="button"
+                onClick={handleAddBankAccount}
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 rounded px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1 transition cursor-pointer select-none"
+              >
+                <Plus className="w-3 h-3" /> Add Account
+              </button>
             </div>
+
+            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+              {bank.accounts.map((acc, aIdx) => (
+                <div key={acc.id} className="border border-slate-200 rounded p-3 bg-slate-50/40 space-y-2.5 text-xs font-medium relative">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Account {aIdx + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBankAccount(acc.id)}
+                      className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                      title="Remove this account"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <label className="text-[9px] text-slate-400 uppercase font-bold">Account Holder Name</label>
+                    <input
+                      type="text"
+                      value={acc.accountName}
+                      onChange={(e) => handleUpdateBankAccount(acc.id, { accountName: e.target.value })}
+                      className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-white text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Account Number</label>
+                      <input
+                        type="text"
+                        value={acc.accountNo}
+                        onChange={(e) => handleUpdateBankAccount(acc.id, { accountNo: e.target.value })}
+                        className="w-full border border-slate-200 rounded p-1.5 focus:outline-none bg-white font-mono text-slate-900 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Account Type</label>
+                      <select
+                        value={acc.accountType}
+                        onChange={(e) => handleUpdateBankAccount(acc.id, { accountType: e.target.value })}
+                        className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-white text-xs font-semibold text-slate-800"
+                      >
+                        <option value="Current">Current</option>
+                        <option value="Savings">Savings</option>
+                        <option value="Cash Credit">Cash Credit</option>
+                        <option value="Overdraft">Overdraft</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Bank IFSC Code</label>
+                      <input
+                        type="text"
+                        value={acc.ifsc}
+                        onChange={(e) => handleUpdateBankAccount(acc.id, { ifsc: e.target.value.toUpperCase() })}
+                        className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-white font-mono text-xs uppercase"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Bank & Branch</label>
+                      <input
+                        type="text"
+                        value={acc.bankBranch}
+                        onChange={(e) => handleUpdateBankAccount(acc.id, { bankBranch: e.target.value })}
+                        className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-white text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {bank.accounts.length === 0 && (
+                <p className="text-2xs text-slate-400 italic text-center py-4">No bank accounts configured. Click "+ Add Account" above.</p>
+              )}
+            </div>
+            <p className="text-[9px] text-slate-400 italic">These accounts pre-fill new quotations. Each quotation keeps its own frozen copy.</p>
           </div>
 
           {/* Card 4: Signature / Stamp toggling & single upload */}

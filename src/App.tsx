@@ -13,7 +13,7 @@ import {
 import { 
   DEFAULT_COMPANY_PROFILE, DEFAULT_MATERIAL_SPECS, 
   DEFAULT_BANK_DETAILS, DEFAULT_TERMS, MOCK_CUSTOMERS, 
-  MOCK_QUOTATIONS, MOCK_AUDIT_LOGS, INDIAN_STATES 
+  MOCK_QUOTATIONS, MOCK_AUDIT_LOGS, INDIAN_STATES, normalizeBankDetails 
 } from './mockData';
 
 // Subcomponents import
@@ -140,7 +140,7 @@ export default function App() {
   });
 
   const [bank, setBank] = useState<BankDetails>(() => 
-    getLocalStorageItem<BankDetails>('fqmp_bank', DEFAULT_BANK_DETAILS)
+    normalizeBankDetails(getLocalStorageItem<any>('fqmp_bank', DEFAULT_BANK_DETAILS))
   );
 
   const [terms, setTerms] = useState<TermCondition[]>(() => 
@@ -165,6 +165,8 @@ export default function App() {
             { id: 'spec-5', text: `Laminate Brands: ${old.laminateBrand || ''}`, checked: true }
           ].filter(item => item.text && item.text.split(': ')[1]?.trim().length > 0);
         }
+        // Migrate any legacy single-account bank shape into the multi-account structure
+        q.bankDetails = normalizeBankDetails(q.bankDetails);
         return q;
       });
     }
@@ -186,6 +188,11 @@ export default function App() {
   // Search filter inside master Quotations Tab
   const [quoteSearch, setQuoteSearch] = useState('');
   const [quoteStateFilter, setQuoteStateFilter] = useState('All');
+
+  // Set the browser tab title for the portal
+  useEffect(() => {
+    document.title = 'Swaraj Furniture Quotation Portal';
+  }, []);
 
   // Sync to LocalStorage on state modifications
   useEffect(() => {
@@ -242,13 +249,19 @@ export default function App() {
 
   // HANDLERS
   const handleSaveQuotation = (q: Quotation) => {
-    const exists = quotations.some(item => item.id === q.id);
+    const existing = quotations.find(item => item.id === q.id);
+    // Freeze the company profile at first save and preserve it across edits, so
+    // later changes to company name/logo/stamp/bank never alter older quotations.
+    const frozen: Quotation = {
+      ...q,
+      companySnapshot: existing?.companySnapshot || q.companySnapshot || { ...company }
+    };
     let updated: Quotation[];
-    if (exists) {
-      updated = quotations.map(item => item.id === q.id ? q : item);
+    if (existing) {
+      updated = quotations.map(item => item.id === q.id ? frozen : item);
       appendAuditLog('UPDATE_QUOTATION', `Updated quotation details for ${q.id}.`);
     } else {
-      updated = [q, ...quotations];
+      updated = [frozen, ...quotations];
       appendAuditLog('CREATE_QUOTATION', `Created and published quotation ${q.id}.`);
     }
     setQuotations(updated);
@@ -332,7 +345,8 @@ export default function App() {
       const activeDisc = q.masterDiscountPercent;
       sub += it.qty * (it.rate * (1 - activeDisc / 100));
     });
-    return sub * 1.18; // Inc standard 18% GST estimate
+    // Apply standard 18% GST unless this quotation is explicitly marked GST-free
+    return q.gstEnabled === false ? sub : sub * 1.18;
   };
 
   // Restricted array of quotations based on active user operator rights

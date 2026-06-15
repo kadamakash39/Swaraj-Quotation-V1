@@ -5,8 +5,8 @@ import {
   Sparkles, CheckCircle, Percent, Receipt, HardHat, Landmark, ShieldCheck,
   GripVertical
 } from 'lucide-react';
-import { Quotation, Customer, QuotationItem, TermCondition, MaterialSpecs, BankDetails } from '../types';
-import { DEFAULT_UOMS, FURNITURE_IMAGES } from '../mockData';
+import { Quotation, Customer, QuotationItem, TermCondition, MaterialSpecs, BankDetails, BankAccount } from '../types';
+import { DEFAULT_UOMS, FURNITURE_IMAGES, normalizeBankDetails } from '../mockData';
 
 interface QuotationBuilderProps {
   customers: Customer[];
@@ -106,13 +106,57 @@ export default function QuotationBuilder({
     return (loaded || []).map(s => ({ ...s }));
   });
   const [terms, setTerms] = useState<TermCondition[]>(initialQuotationToEdit?.terms || masterTerms.map(t => ({ ...t })));
-  const [bankDetails, setBankDetails] = useState<BankDetails>(initialQuotationToEdit?.bankDetails || { ...masterBank });
+
+  // GST toggle: when off, no GST is calculated or shown in the quotation
+  const [gstEnabled, setGstEnabled] = useState<boolean>(initialQuotationToEdit?.gstEnabled !== false);
+
+  // Bank accounts: candidate list (master + any frozen accounts saved on this quotation)
+  // plus a per-quotation selection so the user can include one or more accounts.
+  const normalizedMaster = normalizeBankDetails(masterBank);
+  const normalizedQuoteBank = initialQuotationToEdit ? normalizeBankDetails(initialQuotationToEdit.bankDetails) : null;
+
+  const [bankShowInQuotation, setBankShowInQuotation] = useState<boolean>(
+    normalizedQuoteBank ? normalizedQuoteBank.showInQuotation : normalizedMaster.showInQuotation
+  );
+  const [bankAccounts] = useState<BankAccount[]>(() => {
+    const base = normalizedMaster.accounts.map(a => ({ ...a }));
+    if (normalizedQuoteBank) {
+      normalizedQuoteBank.accounts.forEach(qa => {
+        if (!base.some(b => b.id === qa.id)) base.push({ ...qa });
+      });
+    }
+    return base;
+  });
+  const [selectedBankIds, setSelectedBankIds] = useState<string[]>(() => {
+    if (normalizedQuoteBank) return normalizedQuoteBank.accounts.map(a => a.id);
+    return normalizedMaster.accounts.map(a => a.id); // new quotation: include all by default
+  });
+
+  const toggleBankAccount = (id: string) => {
+    setSelectedBankIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
 
   // Drag and drop state for group re-assignment
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
-  // Custom Groups List (For group wise selections)
-  const [groups, setGroups] = useState<string[]>(['Bedroom Furniture', 'Living Room Furniture', 'Modular Kitchen']);
+  // Custom Groups List (For group wise selections).
+  // When editing, restore the exact saved groups/order so custom groupings are not lost.
+  const [groups, setGroups] = useState<string[]>(() => {
+    if (initialQuotationToEdit) {
+      // Prefer explicitly saved group order, else derive from saved items.
+      const saved = (initialQuotationToEdit.groups && initialQuotationToEdit.groups.length)
+        ? initialQuotationToEdit.groups
+        : Array.from(new Set(
+            (initialQuotationToEdit.items || [])
+              .map(i => (i.groupName || '').trim())
+              .filter(Boolean)
+          ));
+      if (saved.length) return saved;
+    }
+    return ['Bedroom Furniture', 'Living Room Furniture', 'Modular Kitchen'];
+  });
   const [newGroupName, setNewGroupName] = useState('');
 
   // AI Assistant Panel State
@@ -151,7 +195,7 @@ export default function QuotationBuilder({
 
   const subtotal = calculateSubtotal();
   const isMaharashtra = selectedCustomer?.state === 'Maharashtra';
-  const gstRate = 0.18;
+  const gstRate = gstEnabled ? 0.18 : 0;
   const totalGstAmount = subtotal * gstRate;
   const grandTotal = subtotal + totalGstAmount;
 

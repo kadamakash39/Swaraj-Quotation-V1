@@ -60,11 +60,17 @@ export interface MaterialSpecItem {
 
 export type MaterialSpecs = MaterialSpecItem[];
 
-export interface BankDetails {
+export interface BankAccount {
+  id: string;
   accountName: string;
   accountNo: string;
+  accountType: string; // Savings / Current / Cash Credit etc.
   ifsc: string;
   bankBranch: string;
+}
+
+export interface BankDetails {
+  accounts: BankAccount[];
   showInQuotation: boolean;
 }
 
@@ -78,12 +84,15 @@ export interface Quotation {
   items: QuotationItem[];
   masterDiscountPercent: number; // Master discount %
   showImages: boolean; // Yes/No
+  gstEnabled?: boolean; // When false, no GST is calculated or shown (defaults to true)
+  groups?: string[]; // Persisted custom group order/names for Group-Wise quotations
   clientId: string; // Linked customer ID
   status: 'Pending' | 'Approved' | 'Rejected';
   createdBy: string; // User email / role
   materialSpecs: MaterialSpecs;
   terms: TermCondition[];
   bankDetails: BankDetails;
+  companySnapshot?: CompanyProfile; // Frozen company profile captured at save time
   notes?: string;
 }
 
