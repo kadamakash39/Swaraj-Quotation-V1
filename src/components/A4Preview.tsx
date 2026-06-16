@@ -87,9 +87,11 @@ interface PageTemplate {
   hasBillingInfo: boolean;
   hasTableHeader: boolean;
   hasFinancialTotals: boolean;
+  hasBankDetails: boolean;
   termIndices: number[];
   specIndices: number[];
   hasSignature: boolean;
+  signatureColumn?: 'left' | 'right';
 }
 
 // Helper to calculate row heights
@@ -98,11 +100,285 @@ function calculateRowHeight(row: TableRow, showImages: boolean): number {
     return 26;
   }
   if (row.type === 'item') {
+    const desc = row.item.description || '';
+    const linesByNewlines = desc.split('\n');
+    let estimatedLines = 0;
+    const charsPerLine = showImages ? 28 : 50;
+    for (const line of linesByNewlines) {
+      estimatedLines += Math.max(1, Math.ceil(line.length / charsPerLine));
+    }
+    
+    let baseHeight = 34; // standard item row height
     if (showImages && row.item.image) {
-      return 160;
+      baseHeight = 160; // standard image row height
+    }
+    const textHeight = Math.max(0, (estimatedLines - 1) * 13);
+    return Math.max(baseHeight, 30 + textHeight);
+  }
+  return 34;
+}
+
+// Robust, predictive pagination helper pass
+function runPaginationPass(
+  quote: Quotation,
+  companyProfile: CompanyProfile,
+  tableRows: TableRow[],
+  activeTerms: any[],
+  activeSpecs: any[],
+  showImages: boolean,
+  maxRowsPerPage: number | null,
+  totalA4Height: number,
+  isLocal: boolean,
+  includeGst: boolean
+): PageTemplate[] {
+  const pages: PageTemplate[] = [];
+  
+  const headerHeight = 145;
+  const billingInfoHeight = 115;
+  const tableHeaderHeight = 36;
+  const termHeaderHeight = 25;
+  const specHeaderHeight = 25;
+  
+  const bankCount = quote.bankDetails?.showInQuotation
+    ? ((quote.banksSnapshot && Array.isArray(quote.banksSnapshot) && quote.banksSnapshot.length > 0)
+      ? quote.banksSnapshot.length
+      : 1)
+    : 0;
+
+  const hasBankDetails = quote.bankDetails?.showInQuotation === true;
+  const bankDetailsBlockHeight = hasBankDetails ? bankCount * 65 : 0;
+  
+  // Calculate dynamic financial totals height based on taxes
+  let financialTotalsHeight = 120; // Base: Subtotal, Discount, Taxable Amount, Grand Total + spacing
+  if (includeGst) {
+    if (isLocal) {
+      financialTotalsHeight += 38; // CGST + SGST (2 lines * ~19px)
+    } else {
+      financialTotalsHeight += 19; // IGST (1 line * ~19px)
     }
   }
-  return 34; // standard item row height
+  financialTotalsHeight += 45; // Amount in Words sub-block inside totals card
+
+  let rowCursor = 0;
+  let termCursor = 0;
+  let specCursor = 0;
+  
+  let financialTotalsPlaced = false;
+  let bankDetailsPlaced = false;
+  let currentPageIndex = 0;
+
+  while (
+    rowCursor < tableRows.length ||
+    !financialTotalsPlaced ||
+    (hasBankDetails && !bankDetailsPlaced) ||
+    specCursor < activeSpecs.length ||
+    termCursor < activeTerms.length
+  ) {
+    const isPage1 = currentPageIndex === 0;
+    
+    // Start with base page overhead
+    let heightUsed = headerHeight;
+    if (isPage1) {
+      heightUsed += billingInfoHeight;
+    }
+    
+    const pageRows: TableRow[] = [];
+    let pageHasTableHeader = false;
+    let pageHasFinancialTotals = false;
+    let pageHasBankDetails = false;
+    const pageTermIndices: number[] = [];
+    const pageSpecIndices: number[] = [];
+
+    // 1. Pack Table Rows
+    if (rowCursor < tableRows.length) {
+      heightUsed += tableHeaderHeight;
+      pageHasTableHeader = true;
+      
+      while (rowCursor < tableRows.length) {
+        if (maxRowsPerPage !== null && pageRows.length >= maxRowsPerPage) {
+          break;
+        }
+
+        const row = tableRows[rowCursor];
+        const rHeight = calculateRowHeight(row, showImages);
+
+        // Prevent section header from being orphaned if its first item cannot fit on the current page
+        if (row.type === 'section_header' && pageRows.length > 0) {
+          let nextItemIdx = rowCursor + 1;
+          let firstItem: TableRow | null = null;
+          while (nextItemIdx < tableRows.length) {
+            const nextRow = tableRows[nextItemIdx];
+            if (nextRow.type === 'item') {
+              firstItem = nextRow;
+              break;
+            } else if (nextRow.type === 'section_header') {
+              break;
+            }
+            nextItemIdx++;
+          }
+          if (firstItem) {
+            const firstItemHeight = calculateRowHeight(firstItem, showImages);
+            if (heightUsed + rHeight + firstItemHeight > totalA4Height) {
+              // Section header and first item cannot together fit on current page, so defer section to next page
+              break;
+            }
+          }
+        }
+
+        if (heightUsed + rHeight <= totalA4Height) {
+          pageRows.push(row);
+          heightUsed += rHeight;
+          rowCursor++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // 2. Pack Bottom Blocks in Layout Columns (Side-by-Side Simulation)
+    let leftColHeight = 0;
+    let rightColHeight = 0;
+
+    if (rowCursor === tableRows.length) {
+      const remainingHeight = totalA4Height - heightUsed;
+
+      if (remainingHeight > 0) {
+        // Determine Right Column elements to pack on this page
+        if (!financialTotalsPlaced) {
+          const bothNeedToFit = hasBankDetails && !bankDetailsPlaced;
+          const fitsBoth = bothNeedToFit
+            ? (financialTotalsHeight + bankDetailsBlockHeight <= remainingHeight)
+            : (financialTotalsHeight <= remainingHeight);
+
+          if (fitsBoth) {
+            pageHasFinancialTotals = true;
+            rightColHeight = financialTotalsHeight;
+            
+            if (bothNeedToFit) {
+              pageHasBankDetails = true;
+              rightColHeight += bankDetailsBlockHeight;
+            }
+          }
+        } else if (hasBankDetails && !bankDetailsPlaced) {
+          if (bankDetailsBlockHeight <= remainingHeight) {
+            pageHasBankDetails = true;
+            rightColHeight = bankDetailsBlockHeight;
+          }
+        }
+
+        // Determine Left Column elements to pack on this page
+        let specSectionHeaderAdded = false;
+        let tempSpecCursor = specCursor;
+        while (tempSpecCursor < activeSpecs.length) {
+          const sText = activeSpecs[tempSpecCursor]?.text || '';
+          const sLines = Math.max(1, Math.ceil(sText.length / 52));
+          const sHeight = (sLines * 12) + 6;
+          const potentialHeader = !specSectionHeaderAdded ? specHeaderHeight : 0;
+          
+          const nextLeftColHeight = leftColHeight + sHeight + potentialHeader;
+          const potentialPageHeightUsed = Math.max(nextLeftColHeight, rightColHeight);
+          
+          if (potentialPageHeightUsed <= remainingHeight) {
+            if (!specSectionHeaderAdded) {
+              leftColHeight += specHeaderHeight;
+              specSectionHeaderAdded = true;
+            }
+            pageSpecIndices.push(tempSpecCursor);
+            leftColHeight += sHeight;
+            tempSpecCursor++;
+          } else {
+            break;
+          }
+        }
+
+        let termSectionHeaderAdded = false;
+        let tempTermCursor = termCursor;
+        while (tempTermCursor < activeTerms.length) {
+          const tText = activeTerms[tempTermCursor]?.text || '';
+          const tLines = Math.max(1, Math.ceil(tText.length / 52));
+          const tHeight = (tLines * 12) + 6;
+          const potentialHeader = !termSectionHeaderAdded ? termHeaderHeight : 0;
+          
+          const nextLeftColHeight = leftColHeight + tHeight + potentialHeader;
+          const potentialPageHeightUsed = Math.max(nextLeftColHeight, rightColHeight);
+          
+          if (potentialPageHeightUsed <= remainingHeight) {
+            if (!termSectionHeaderAdded) {
+              leftColHeight += termHeaderHeight;
+              termSectionHeaderAdded = true;
+            }
+            pageTermIndices.push(tempTermCursor);
+            leftColHeight += tHeight;
+            tempTermCursor++;
+          } else {
+            break;
+          }
+        }
+
+        // Update the cursors and flags for what we successfully packed
+        if (pageHasFinancialTotals) {
+          financialTotalsPlaced = true;
+        }
+        if (pageHasBankDetails) {
+          bankDetailsPlaced = true;
+        }
+        if (pageSpecIndices.length > 0) {
+          specCursor = tempSpecCursor;
+        }
+        if (pageTermIndices.length > 0) {
+          termCursor = tempTermCursor;
+        }
+
+        // Incorporate the correct height overhead we consumed on this page
+        heightUsed += Math.max(leftColHeight, rightColHeight);
+      }
+    }
+
+    // 6. Force-pack fallback (to prevent infinite loops if something is too big to fit)
+    const anythingPlaced = 
+      pageRows.length > 0 || 
+      pageHasFinancialTotals || 
+      pageHasBankDetails || 
+      pageSpecIndices.length > 0 || 
+      pageTermIndices.length > 0;
+
+    if (!anythingPlaced) {
+      if (rowCursor < tableRows.length) {
+        const row = tableRows[rowCursor];
+        pageRows.push(row);
+        rowCursor++;
+      } else if (!financialTotalsPlaced) {
+        pageHasFinancialTotals = true;
+        financialTotalsPlaced = true;
+      } else if (hasBankDetails && !bankDetailsPlaced) {
+        pageHasBankDetails = true;
+        bankDetailsPlaced = true;
+      } else if (specCursor < activeSpecs.length) {
+        pageSpecIndices.push(specCursor);
+        specCursor++;
+      } else if (termCursor < activeTerms.length) {
+        pageTermIndices.push(termCursor);
+        termCursor++;
+      }
+    }
+
+    pages.push({
+      pageNumber: currentPageIndex + 1,
+      rows: pageRows,
+      hasHeader: true,
+      hasBillingInfo: isPage1,
+      hasTableHeader: pageHasTableHeader,
+      hasFinancialTotals: pageHasFinancialTotals,
+      hasBankDetails: pageHasBankDetails,
+      termIndices: pageTermIndices,
+      specIndices: pageSpecIndices,
+      hasSignature: false,
+    });
+
+    currentPageIndex++;
+  }
+
+  return pages;
 }
 
 // Robust, predictive pagination splitter to allocate table items page-by-page inside A4 limits
@@ -111,7 +387,9 @@ function paginateQuotation(
   companyProfile: CompanyProfile,
   activeTerms: any[],
   activeSpecs: any[],
-  showImages: boolean
+  showImages: boolean,
+  isLocal: boolean,
+  includeGst: boolean
 ): PageTemplate[] {
   const tableRows: TableRow[] = [];
   const uniqueGroups = Array.from(new Set(quote.items.map(item => (item.groupName || '').trim()).filter(Boolean)));
@@ -151,195 +429,8 @@ function paginateQuotation(
     });
   }
 
-  const pages: PageTemplate[] = [];
-  
-  // Available height limit for layout blocks inside A4 portrait inside safe print bounds
-  const totalA4Height = 930; 
-  const headerHeight = 145;
-  const billingInfoHeight = 115;
-  const tableHeaderHeight = 36;
-  const termHeaderHeight = 25;
-  const specHeaderHeight = 25;
-  const financialTotalsHeight = 165;
-  const signatureHeight = 205;
-
-  let currentPageIndex = 0;
-  
-  // Cursor indices
-  let rowCursor = 0;
-  let termCursor = 0;
-  let specCursor = 0;
-  
-  // Flags for blocks that must be placed
-  let placedTotals = false;
-  let placedSignature = false;
-
-  while (
-    rowCursor < tableRows.length ||
-    !placedTotals ||
-    termCursor < activeTerms.length ||
-    specCursor < activeSpecs.length ||
-    !placedSignature
-  ) {
-    const isPage1 = currentPageIndex === 0;
-    
-    // Start with base page overhead
-    let heightUsed = headerHeight;
-    if (isPage1) {
-      heightUsed += billingInfoHeight;
-    }
-    
-    const pageRows: TableRow[] = [];
-    let pageHasTableHeader = false;
-    let pageHasFinancialTotals = false;
-    const pageTermIndices: number[] = [];
-    const pageSpecIndices: number[] = [];
-    let pageHasSignature = false;
-
-    // 1. Pack Table Rows
-    if (rowCursor < tableRows.length) {
-      // We are going to pack some rows. First add the table header overhead.
-      heightUsed += tableHeaderHeight;
-      pageHasTableHeader = true;
-      
-      while (rowCursor < tableRows.length) {
-        const row = tableRows[rowCursor];
-        const rHeight = calculateRowHeight(row, showImages);
-        if (heightUsed + rHeight <= totalA4Height) {
-          pageRows.push(row);
-          heightUsed += rHeight;
-          rowCursor++;
-        } else {
-          // No more rows fit on this page
-          break;
-        }
-      }
-    }
-
-    // 2. Pack Financial Totals Block
-    if (rowCursor === tableRows.length && !placedTotals) {
-      if (heightUsed + financialTotalsHeight <= totalA4Height) {
-        pageHasFinancialTotals = true;
-        heightUsed += financialTotalsHeight;
-        placedTotals = true;
-      }
-    }
-
-    // 3. Pack Terms & Conditions
-    if (placedTotals && termCursor < activeTerms.length) {
-      let termSectionHeaderAdded = false;
-      const originalHeight = heightUsed;
-      
-      if (heightUsed + termHeaderHeight + 20 <= totalA4Height) {
-        heightUsed += termHeaderHeight;
-        termSectionHeaderAdded = true;
-        
-        let pageTermsPackedCount = 0;
-        while (termCursor < activeTerms.length) {
-          const isNewRow = (pageTermsPackedCount % 2 === 0);
-          const tHeight = isNewRow ? 20 : 0;
-          if (heightUsed + tHeight <= totalA4Height) {
-            pageTermIndices.push(termCursor);
-            heightUsed += tHeight;
-            termCursor++;
-            pageTermsPackedCount++;
-          } else {
-            break;
-          }
-        }
-      }
-      
-      if (pageTermIndices.length === 0 && termSectionHeaderAdded) {
-        heightUsed = originalHeight;
-      }
-    }
-
-    // 4. Pack Material Specifications
-    if (placedTotals && termCursor === activeTerms.length && specCursor < activeSpecs.length) {
-      let specSectionHeaderAdded = false;
-      const originalHeight = heightUsed;
-      
-      if (heightUsed + specHeaderHeight + 20 <= totalA4Height) {
-        heightUsed += specHeaderHeight;
-        specSectionHeaderAdded = true;
-        
-        let pageSpecsPackedCount = 0;
-        while (specCursor < activeSpecs.length) {
-          const isNewRow = (pageSpecsPackedCount % 2 === 0);
-          const sHeight = isNewRow ? 20 : 0;
-          if (heightUsed + sHeight <= totalA4Height) {
-            pageSpecIndices.push(specCursor);
-            heightUsed += sHeight;
-            specCursor++;
-            pageSpecsPackedCount++;
-          } else {
-            break;
-          }
-        }
-      }
-      
-      if (pageSpecIndices.length === 0 && specSectionHeaderAdded) {
-        heightUsed = originalHeight;
-      }
-    }
-
-    // 5. Pack Signature Block
-    if (
-      placedTotals &&
-      termCursor === activeTerms.length &&
-      specCursor === activeSpecs.length &&
-      !placedSignature
-    ) {
-      if (heightUsed + signatureHeight <= totalA4Height) {
-        pageHasSignature = true;
-        heightUsed += signatureHeight;
-        placedSignature = true;
-      }
-    }
-
-    // Guard: if nothing was placed on this page, force pack something to avoid infinite loops
-    if (
-      pageRows.length === 0 &&
-      !pageHasFinancialTotals &&
-      pageTermIndices.length === 0 &&
-      pageSpecIndices.length === 0 &&
-      !pageHasSignature
-    ) {
-      if (rowCursor < tableRows.length) {
-        const row = tableRows[rowCursor];
-        pageRows.push(row);
-        rowCursor++;
-      } else if (!placedTotals) {
-        pageHasFinancialTotals = true;
-        placedTotals = true;
-      } else if (termCursor < activeTerms.length) {
-        pageTermIndices.push(termCursor);
-        termCursor++;
-      } else if (specCursor < activeSpecs.length) {
-        pageSpecIndices.push(specCursor);
-        specCursor++;
-      } else if (!placedSignature) {
-        pageHasSignature = true;
-        placedSignature = true;
-      }
-    }
-
-    pages.push({
-      pageNumber: currentPageIndex + 1,
-      rows: pageRows,
-      hasHeader: true,
-      hasBillingInfo: isPage1,
-      hasTableHeader: pageHasTableHeader,
-      hasFinancialTotals: pageHasFinancialTotals,
-      termIndices: pageTermIndices,
-      specIndices: pageSpecIndices,
-      hasSignature: pageHasSignature,
-    });
-
-    currentPageIndex++;
-  }
-
-  return pages;
+  // standard available print bounds limit: 900 (with extra safe footer margin space)
+  return runPaginationPass(quote, companyProfile, tableRows, activeTerms, activeSpecs, showImages, null, 900, isLocal, includeGst);
 }
 
 export default function A4Preview({
@@ -396,7 +487,7 @@ export default function A4Preview({
   const showImages = quotation.showImages !== false;
 
   // Paginate pages dynamically
-  const pages = paginateQuotation(quotation, companyProfile, activeTerms, activeSpecs, showImages);
+  const pages = paginateQuotation(quotation, companyProfile, activeTerms, activeSpecs, showImages, isLocal, includeGst);
 
   // Trigger web system printing
   const triggerPrint = () => {
@@ -503,7 +594,7 @@ export default function A4Preview({
             background: #ffffff !important;
             display: flex !important;
             flex-direction: column !important;
-            justify-content: space-between !important;
+            justify-content: flex-start !important;
             position: relative !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -605,9 +696,16 @@ export default function A4Preview({
                           {companyProfile.name}
                         </h1>
                         <p className="text-[10px] text-slate-600 max-w-[360px] leading-snug text-left font-bold">{companyProfile.address}</p>
-                        <p className="text-[10px] text-slate-700 font-bold font-sans text-left mt-0.5">
+                        <p className="text-[10px] text-slate-700 font-bold font-sans text-left mt-0.5 whitespace-nowrap">
                           Email: {companyProfile.email} | Mobile: {companyProfile.mobile}
                         </p>
+                        {(companyProfile.gstin || companyProfile.pan) && (
+                          <p className="text-[10px] text-slate-700 font-bold font-sans text-left mt-0.5 uppercase whitespace-nowrap">
+                            {companyProfile.gstin ? `GSTIN: ${companyProfile.gstin}` : ''}
+                            {companyProfile.gstin && companyProfile.pan ? ' | ' : ''}
+                            {companyProfile.pan ? `PAN: ${companyProfile.pan}` : ''}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -630,9 +728,9 @@ export default function A4Preview({
                         {matchedCustomer?.companyName && (
                           <p className="font-bold text-slate-700 leading-none text-[10px] text-left">{matchedCustomer.companyName}</p>
                         )}
-                        <p className="text-slate-655 max-w-[320px] leading-snug text-left">{matchedCustomer?.address || '[Client Address]'}</p>
+                        <p className="text-slate-600 max-w-[320px] leading-snug text-left">{matchedCustomer?.address || '[Client Address]'}</p>
                         {matchedCustomer?.city && (
-                          <p className="text-slate-655 font-bold text-left">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
+                          <p className="text-slate-600 font-bold text-left">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
                         )}
                         <p className="text-slate-500 font-bold mt-0.5 text-[9.5px] text-left">
                           GST: {matchedCustomer?.gstin?.trim() ? matchedCustomer.gstin.trim() : 'Unregistered'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
@@ -655,19 +753,19 @@ export default function A4Preview({
                     <div className="w-full overflow-hidden">
                       <table className="w-full text-left text-[11px] border-collapse border-2 border-slate-800 font-sans shadow-none">
                         <thead>
-                          <tr className="bg-slate-50 text-slate-900 border-b-2 border-slate-800 no-print-background">
-                            <th className="p-2 w-[6%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">SR NO</th>
-                            <th className={`p-2 ${showImages ? 'w-[26%]' : 'w-[48%]' } text-left border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight`}>ITEM DESCRIPTION</th>
+                          <tr className="bg-[#1E3A8A] text-white border-b-2 border-slate-800 no-print-background">
+                            <th className="p-2 w-[6%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">SR NO</th>
+                            <th className={`p-2 ${showImages ? 'w-[26%]' : 'w-[48%]' } text-left border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white`}>ITEM DESCRIPTION</th>
                             {showImages && (
-                              <th className="p-2 w-[22%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">ITEM IMAGE</th>
+                              <th className="p-2 w-[22%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">ITEM IMAGE</th>
                             )}
-                            <th className="p-2 w-[6%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">QTY</th>
-                            <th className="p-2 w-[7%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">UNIT</th>
-                            <th className="p-2 w-[10%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">RATE</th>
-                            <th className="p-2 w-[6%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">DISC %</th>
-                            <th className="p-2 w-[8%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">DISC. AMT</th>
-                            <th className="p-2 w-[10%] text-center border-r-2 border-slate-800 font-black uppercase text-[10px] tracking-tight">NET RATE</th>
-                            <th className="p-2 w-[11%] text-center font-black uppercase text-[10px] tracking-tight">AMOUNT</th>
+                            <th className="p-2 w-[6%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">QTY</th>
+                            <th className="p-2 w-[7%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">UNIT</th>
+                            <th className="p-2 w-[10%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">RATE</th>
+                            <th className="p-2 w-[6%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">DISC %</th>
+                            <th className="p-2 w-[8%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">DISC. AMT</th>
+                            <th className="p-2 w-[10%] text-center border-r border-white/20 font-black uppercase text-[10px] tracking-tight text-white">NET RATE</th>
+                            <th className="p-2 w-[11%] text-center font-black uppercase text-[10px] tracking-tight text-white">AMOUNT</th>
                           </tr>
                         </thead>
                         <tbody className="font-semibold text-slate-900">
@@ -775,184 +873,194 @@ export default function A4Preview({
                 </div>
 
                 {/* 2. BOTTOM WRAPPER containing summary fields page-by-page */}
-                <div className="flex flex-col mt-3 shrink-0 text-left">
+                <div className="mt-3 shrink-0 text-left w-full grid grid-cols-2 gap-6 items-start font-sans">
                   
-                  {page.hasFinancialTotals && (
-                    <div className="flex flex-col mb-1 shrink-0 w-full animate-fade-in">
-                      {/* Amount in Words */}
-                      <div className="text-[11px] font-sans font-medium text-slate-800 mb-2.5 text-left">
-                        <strong className="text-slate-500 uppercase tracking-wider text-[9px] mr-1.5 font-bold">Amount in Words:</strong>
-                        <span className="font-extrabold text-slate-900">Rupees {convertNumberToWords(grandTotal)} Only</span>
-                      </div>
-
-                      {/* Side by side grid wrap for bank and totals */}
-                      <div className="grid grid-cols-2 gap-6 items-start text-[10px] font-sans w-full">
-                        {/* Left Column: Bank details */}
-                        <div>
-                          {quotation.bankDetails.showInQuotation ? (
-                            <div className="space-y-2 max-h-[160px] overflow-hidden">
-                              {(quotation.banksSnapshot && Array.isArray(quotation.banksSnapshot) && quotation.banksSnapshot.length > 0
-                                ? quotation.banksSnapshot
-                                : [quotation.bankDetails]
-                              ).map((bankAcc, bIdx) => (
-                                <div key={bIdx} className="border border-slate-300 rounded-xl p-2.5 bg-white shadow-3xs text-left space-y-0.5">
-                                  <p className="font-extrabold text-[#1E3A8A] uppercase tracking-wider text-[8px] pb-0.5 border-b border-slate-200 leading-none">
-                                    BANK DETAILS {quotation.banksSnapshot && quotation.banksSnapshot.length > 1 ? `#${bIdx + 1}` : ''}
-                                    {bankAcc.accountType ? ` (${bankAcc.accountType})` : ''}:
-                                  </p>
-                                  <ul className="text-[8.5px] text-slate-700 font-bold space-y-px font-sans leading-tight">
-                                    <li className="flex items-start gap-1">
-                                      <span className="text-slate-400 select-none shrink-0">•</span>
-                                      <span><strong className="text-slate-600 font-semibold font-medium">Holder:</strong> {bankAcc.accountName || companyProfile.name}</span>
-                                    </li>
-                                    <li className="flex items-start gap-1">
-                                      <span className="text-slate-400 select-none shrink-0">•</span>
-                                      <span><strong className="text-slate-600 font-semibold font-medium">A/C No:</strong> <span className="font-mono text-slate-950 font-extrabold">{bankAcc.accountNo}</span></span>
-                                    </li>
-                                    <li className="flex items-start gap-1">
-                                      <span className="text-slate-400 select-none shrink-0">•</span>
-                                      <span><strong className="text-slate-600 font-semibold font-medium">IFSC:</strong> <span className="font-mono text-slate-950 font-extrabold">{bankAcc.ifsc}</span></span>
-                                    </li>
-                                    <li className="flex items-start gap-1">
-                                      <span className="text-slate-400 select-none shrink-0">•</span>
-                                      <span><strong className="text-slate-600 font-semibold font-medium">Branch:</strong> {bankAcc.bankBranch}</span>
-                                    </li>
-                                  </ul>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-slate-400 italic text-[9px] text-left pt-2">
-                              Bank transfer options available upon invoice confirmation.
-                            </div>
-                          )}
+                  {/* Left Column: Material Specifications and Terms & Conditions */}
+                  <div className="space-y-3">
+                    {/* Block 3: Material Specifications */}
+                    {page.specIndices.length > 0 && (
+                      <div className="border border-slate-300 rounded-xl p-3.5 bg-white shadow-3xs text-left animate-fade-in w-full text-[9px]">
+                        <p className="font-bold text-[#1E3A8A] uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-2">
+                          Material Specification
+                        </p>
+                        <div className="space-y-1 text-slate-700 font-bold leading-normal text-left">
+                          {page.specIndices.map((idx) => {
+                            const spec = activeSpecs[idx];
+                            return (
+                              <p key={spec.id} className="flex gap-1.5 items-start">
+                                <span className="font-black text-[#1E3A8A] shrink-0">•</span>
+                                <span className="text-slate-800">{spec.text}</span>
+                              </p>
+                            );
+                          })}
                         </div>
+                      </div>
+                    )}
 
-                        {/* Right Column: Totals details table with decreased line spacing */}
-                        <div className="flex flex-col justify-start">
-                          <div className="w-full max-w-[240px] ml-auto space-y-0 text-right text-slate-850 text-[10px] font-medium leading-none font-sans">
-                            <h3 className="font-bold text-[#1E3A8A] text-right mb-1.5 text-[10px] uppercase tracking-wider">Totals</h3>
-                            <div className="flex justify-between border-b border-slate-100 py-[2px]">
-                              <span className="text-slate-500 font-semibold">Subtotal:</span>
-                              <span className="font-bold text-slate-900">₹{grossSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between border-b border-slate-100 py-[2px]">
-                              <span className="text-slate-500 font-semibold">Discount:</span>
-                              <span className="font-bold text-slate-700">₹{totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between border-b border-dashed border-slate-350 py-[2px] uppercase text-slate-900">
-                              <span className="font-bold text-[8.5px] text-slate-550">Taxable Amount:</span>
-                              <span className="font-extrabold text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
+                    {/* Block 4: Terms & Conditions */}
+                    {page.termIndices.length > 0 && (
+                      <div className="border border-slate-300 rounded-xl p-3.5 bg-white shadow-3xs text-left animate-fade-in w-full text-[9px]">
+                        <p className="font-bold text-[#1E3A8A] uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-2">
+                          Terms & Conditions
+                        </p>
+                        <div className="space-y-1 text-slate-700 font-bold leading-normal text-left">
+                          {page.termIndices.map((idx) => {
+                            const term = activeTerms[idx];
+                            return (
+                              <p key={term.id} className="flex gap-1.5 items-start">
+                                <span className="font-black text-slate-700 shrink-0">{idx + 1}.</span>
+                                <span>{term.text}</span>
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                            {includeGst ? (
-                              isLocal ? (
-                                <>
+                  {/* Right Column: Totals and Bank Details */}
+                  <div className="space-y-3">
+                    {/* Block 1: Totals with Amount in Words */}
+                    {page.hasFinancialTotals && (
+                      <div className="border border-slate-300 rounded-xl p-3.5 bg-white shadow-3xs animate-fade-in w-full">
+                        <div className="flex flex-col justify-between gap-3">
+                          
+                          {/* Totals calculations (Right Aligned) */}
+                          <div className="w-full">
+                            <div className="w-full space-y-0.5 text-right text-slate-850 text-[10px] font-medium leading-none font-sans">
+                              <h3 className="font-bold text-[#1E3A8A] text-right mb-1.5 text-[10px] uppercase tracking-wider">Totals</h3>
+                              <div className="flex justify-between border-b border-slate-100 py-[2px]">
+                                <span className="text-slate-500 font-semibold text-left">Subtotal:</span>
+                                <span className="font-bold text-slate-900">₹{grossSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-slate-100 py-[2px]">
+                                <span className="text-slate-500 font-semibold text-left">Discount:</span>
+                                <span className="font-bold text-slate-700">₹{totalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-dashed border-slate-350 py-[2px] uppercase text-slate-900">
+                                <span className="font-bold text-[8.5px] text-slate-550 text-left">Taxable Amount:</span>
+                                <span className="font-extrabold text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+
+                              {includeGst ? (
+                                isLocal ? (
+                                  <>
+                                    <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
+                                      <span className="text-left">CGST 9%:</span>
+                                      <span className="font-semibold text-slate-800">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
+                                      <span className="text-left">SGST 9%:</span>
+                                      <span className="font-semibold text-slate-800">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                  </>
+                                ) : (
                                   <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
-                                    <span>CGST 9%:</span>
-                                    <span className="font-semibold text-slate-800">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <span className="text-left">IGST 18%:</span>
+                                    <span className="font-semibold text-slate-800">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                   </div>
-                                  <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
-                                    <span>SGST 9%:</span>
-                                    <span className="font-semibold text-slate-800">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
-                                  <span>IGST 18%:</span>
-                                  <span className="font-semibold text-slate-800">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                              )
-                            ) : null}
+                                )
+                              ) : null}
 
-                            <div className="flex justify-between border-t border-slate-400 pt-[3px] font-black text-[10.5px] text-[#1E3A8A] uppercase tracking-wider">
-                              <span>GRAND TOTAL:</span>
-                              <span>₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              <div className="flex justify-between border-t border-slate-400 pt-[4px] font-black text-[12.5px] text-[#1E3A8A] uppercase tracking-wider">
+                                <span className="text-left">GRAND TOTAL:</span>
+                                <span>₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* Terms & Conditions - FULL WIDE rectangular space */}
-                  {page.termIndices.length > 0 && (
-                    <div className="space-y-1 text-left mt-3 pt-3 border-t border-slate-300 w-full animate-fade-in">
-                      <p className="font-bold text-[#1E3A8A] uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1.5">
-                        Terms & Conditions
-                      </p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 text-slate-700 font-bold leading-normal text-left text-[9px] w-full">
-                        {page.termIndices.map((idx) => {
-                          const term = activeTerms[idx];
-                          return (
-                            <p key={term.id} className="flex gap-1.5 items-start">
-                              <span className="font-black text-slate-700 shrink-0">{idx + 1}.</span>
-                              <span>{term.text}</span>
-                            </p>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                          {/* Amount in Words (Below grand total, nicely separated inside) */}
+                          <div className="text-left border-t border-slate-150 pt-2 bg-slate-50/50 -mx-3.5 -mb-3.5 p-3 rounded-b-xl border-t border-slate-200">
+                            <span className="text-slate-500 uppercase tracking-widest text-[7.5px] font-black block mb-0.5">
+                              Amount in Words:
+                            </span>
+                            <span className="font-black text-slate-900 block leading-tight text-[9.5px]">
+                              Rupees {convertNumberToWords(grandTotal)} Only
+                            </span>
+                          </div>
 
-                  {/* Material Specifications - FULL WIDE rectangular space */}
-                  {page.specIndices.length > 0 && (
-                    <div className="space-y-1 text-left mt-3 pt-3 border-t border-slate-300 w-full animate-fade-in">
-                      <p className="font-bold text-[#1E3A8A] uppercase tracking-widest text-[9.5px] border-b border-slate-200 pb-1 mb-1.5">
-                        Material Specification
-                      </p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 text-slate-700 font-bold leading-normal text-left text-[9px] w-full">
-                        {page.specIndices.map((idx) => {
-                          const spec = activeSpecs[idx];
-                          return (
-                            <p key={spec.id} className="flex gap-1.5 items-start">
-                              <span className="font-black text-[#1E3A8A] shrink-0">•</span>
-                              <span className="text-slate-800">{spec.text}</span>
-                            </p>
-                          );
-                        })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Signature box stamp - Align Right below items */}
-                  {page.hasSignature && (
-                    <div className="flex justify-end pt-3 w-full animate-fade-in">
-                      <div className="border border-slate-300 rounded-xl p-3 w-full max-w-[340px] bg-slate-50/15 shadow-3xs flex flex-col items-center justify-between text-center space-y-1.5 h-[185px] overflow-hidden">
-                        <div className="text-[9px] font-black text-slate-700 uppercase tracking-wide leading-none">
-                          FOR {companyProfile.name.toUpperCase()}
-                        </div>
-                        
-                        <div className="h-32 flex items-center justify-center w-full relative">
-                          {companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
-                            <img 
-                              src={companyProfile.stampAndSignature || companyProfile.stamp} 
-                              alt="Authorized Stamp & Seal" 
-                              className="max-h-32 max-w-full object-contain mix-blend-multiply rotate-[-1deg] opacity-95 transition-all" 
-                            />
-                          ) : (
-                            <div className="text-[8px] text-slate-300 italic flex items-center justify-center h-full select-none leading-none">
-                              (Stamp & Signature Area)
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="w-full text-[9px] font-black text-slate-900 uppercase tracking-wider border-t border-slate-200 pt-1.5 leading-none">
-                          AUTHORISED SIGNATORY
-                        </div>
+                    {/* Block 2: Bank details */}
+                    {page.hasBankDetails && (
+                      <div className="w-full animate-fade-in text-[9.5px]">
+                        {quotation.bankDetails.showInQuotation ? (
+                          <div className="space-y-2">
+                            {(quotation.banksSnapshot && Array.isArray(quotation.banksSnapshot) && quotation.banksSnapshot.length > 0
+                              ? quotation.banksSnapshot
+                              : [quotation.bankDetails]
+                            ).map((bankAcc, bIdx) => (
+                              <div key={bIdx} className="border border-slate-300 rounded-xl p-2.5 bg-white shadow-3xs text-left w-full">
+                                <p className="font-extrabold text-[#1E3A8A] uppercase tracking-wider text-[9px] pb-1 border-b border-slate-200 leading-none mb-1.5">
+                                  BANK DETAILS {quotation.banksSnapshot && quotation.banksSnapshot.length > 1 ? `#${bIdx + 1}` : ''}
+                                  {bankAcc.accountType ? ` (${bankAcc.accountType})` : ''}:
+                                </p>
+                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-bold font-sans leading-normal">
+                                  {bankAcc.bankName && (
+                                    <p className="truncate">
+                                      <strong className="text-slate-500 font-semibold font-medium">Bank:</strong> <span className="text-slate-900 font-extrabold font-sans text-[9px]">{bankAcc.bankName}</span>
+                                    </p>
+                                  )}
+                                  <p className="truncate">
+                                    <strong className="text-slate-500 font-semibold font-medium">Holder:</strong> <span className="text-slate-800">{bankAcc.accountName || companyProfile.name}</span>
+                                  </p>
+                                  <p className="truncate">
+                                    <strong className="text-slate-500 font-semibold font-medium">A/C:</strong> <span className="font-mono text-slate-950 font-extrabold text-[10px]">{bankAcc.accountNo}</span>
+                                  </p>
+                                  <p className="truncate">
+                                    <strong className="text-slate-500 font-semibold font-medium">IFSC:</strong> <span className="font-mono text-slate-950 font-extrabold">{bankAcc.ifsc}</span>
+                                  </p>
+                                  {bankAcc.bankBranch && (
+                                    <p className="truncate col-span-2 text-[9px]">
+                                      <strong className="text-slate-500 font-semibold font-medium">Branch:</strong> <span className="text-slate-700 font-semibold">{bankAcc.bankBranch}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="border border-slate-300 rounded-xl p-2.5 bg-slate-50 text-slate-400 italic text-[9px] text-left leading-normal">
+                            Bank transfer options available upon invoice confirmation.
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                 </div>
 
                 {/* Bottom branding footer bar & pagination counter */}
-                <div className="flex justify-between items-center bg-slate-100 border border-slate-200 rounded mt-auto py-1.5 px-3 text-[8.5px] text-slate-600 uppercase font-black tracking-wide leading-none select-none font-sans no-print-background shadow-3xs w-full shrink-0">
-                  <div className="truncate max-w-[480px]">
-                    {companyProfile.address ? companyProfile.address.replace(/\n/g, ' ') : ''} | Phone: {companyProfile.mobile}
+                <div className="absolute bottom-[10mm] left-[15mm] right-[15mm] flex justify-between items-center border-t border-slate-200 pt-2 text-[8.5px] text-slate-500 uppercase font-black tracking-wide leading-none select-none font-sans no-print-background shrink-0 overflow-visible">
+                  {/* Left Side: Page Numbers prominently on left side */}
+                  <div className="flex flex-col gap-1 items-start text-left">
+                    <div className="font-mono text-[9.5px] font-black text-[#1E3A8A] tracking-wider leading-none">
+                      PAGE {page.pageNumber} OF {pages.length}
+                    </div>
                   </div>
-                  <div className="font-mono text-[9px] font-bold shrink-0 text-[#1E3A8A]">
-                    Page {page.pageNumber} of {pages.length}
+
+                  {/* Right Side: Stamp image whichever is uploaded, placed cleanly inside the right of the footer bar */}
+                  <div className="relative h-10 w-40 flex items-center justify-end shrink-0">
+                    {pIdx === pages.length - 1 ? (
+                      companyProfile.showStampSignature && (companyProfile.stampAndSignature || companyProfile.stamp) ? (
+                        <div className="relative w-full h-full">
+                          <img 
+                            src={companyProfile.stampAndSignature || companyProfile.stamp} 
+                            alt="Authorized Stamp & Seal" 
+                            className="max-h-[75px] max-w-[165px] object-contain mix-blend-multiply rotate-[-1deg] opacity-95 transition-all absolute right-[-4px] bottom-[-2px]" 
+                          />
+                          <div className="text-[7px] text-slate-500 font-bold select-none absolute right-[-4px] bottom-[-12px] tracking-wider uppercase font-sans whitespace-nowrap">
+                            Authorized Signatory
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[7.5px] text-slate-400 italic font-bold select-none pr-1 uppercase tracking-wider">
+                          (Signature Stamp)
+                        </div>
+                      )
+                    ) : null}
                   </div>
                 </div>
 

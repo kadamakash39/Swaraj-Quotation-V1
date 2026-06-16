@@ -62,6 +62,7 @@ export type MaterialSpecs = MaterialSpecItem[];
 
 export interface BankDetails {
   id?: string;
+  bankName?: string;
   accountName: string;
   accountNo: string;
   ifsc: string;

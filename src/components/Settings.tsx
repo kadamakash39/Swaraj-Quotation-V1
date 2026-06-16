@@ -400,6 +400,7 @@ export default function Settings({
                 onClick={() => {
                   const newBank: BankDetails = {
                     id: 'bank-' + Date.now() + '-' + Math.floor(Math.random() * 100),
+                    bankName: '',
                     accountName: profile.name || 'Swaraj Furniture Pvt Ltd',
                     accountNo: '',
                     ifsc: '',
@@ -434,7 +435,23 @@ export default function Settings({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium">
-                    <div className="space-y-0.5 col-span-1 sm:col-span-2">
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Bank Name</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Bank of Baroda"
+                        value={item.bankName || ''}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].bankName = e.target.value;
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-0.5">
                       <label className="text-[9px] text-slate-400 uppercase font-bold">Holder Name</label>
                       <input
                         type="text"

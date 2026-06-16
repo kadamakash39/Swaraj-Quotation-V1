@@ -136,10 +136,11 @@ export const DEFAULT_MATERIAL_SPECS: MaterialSpecs = [
 ];
 
 export const DEFAULT_BANK_DETAILS: BankDetails = {
+  bankName: 'Bank of Baroda',
   accountName: 'Swaraj Furniture Pvt Ltd',
   accountNo: '08810500015125',
   ifsc: 'BARB0BARAMA',
-  bankBranch: 'Baramati MIDC Road Branch - Bank of Baroda',
+  bankBranch: 'Baramati MIDC Road Branch',
   showInQuotation: true
 };
 

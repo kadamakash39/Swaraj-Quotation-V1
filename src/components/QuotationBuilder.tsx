@@ -76,17 +76,7 @@ export default function QuotationBuilder({
   const [quickGstin, setQuickGstin] = useState('');
 
   const [type, setType] = useState<'Standard' | 'Group-Wise'>(initialQuotationToEdit?.type || 'Standard');
-  const [items, setItems] = useState<QuotationItem[]>(initialQuotationToEdit?.items || [
-    {
-      id: 'it-' + Date.now(),
-      description: 'Custom Wooden Wardrobe with internal drawers',
-      uom: 'Sft',
-      qty: 80,
-      rate: 1500,
-      discountPercent: 0,
-      image: FURNITURE_IMAGES.wardrobe
-    }
-  ]);
+  const [items, setItems] = useState<QuotationItem[]>(initialQuotationToEdit?.items || []);
   const [masterDiscountPercent, setMasterDiscountPercent] = useState<number>(initialQuotationToEdit?.masterDiscountPercent || 0);
   const [showImages, setShowImages] = useState<boolean>(initialQuotationToEdit?.showImages ?? true);
   const [status, setStatus] = useState<'Pending' | 'Approved' | 'Rejected'>(initialQuotationToEdit?.status || 'Pending');
@@ -140,7 +130,7 @@ export default function QuotationBuilder({
       const uniqueGroups = Array.from(new Set(activeGroups));
       if (uniqueGroups.length > 0) return uniqueGroups;
     }
-    return ['Bedroom Furniture', 'Living Room Furniture', 'Modular Kitchen'];
+    return [];
   });
   const [newGroupName, setNewGroupName] = useState('');
 
@@ -201,10 +191,6 @@ export default function QuotationBuilder({
   };
 
   const handleRemoveItem = (id: string) => {
-    if (items.length <= 1) {
-      alert("Quotation must hold at least one transaction row.");
-      return;
-    }
     setItems(items.filter(item => item.id !== id));
   };
 
@@ -798,7 +784,14 @@ export default function QuotationBuilder({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                    {items.map((item, index) => {
+                    {items.length === 0 ? (
+                      <tr>
+                        <td colSpan={showImages ? 9 : 8} className="py-8 text-center text-slate-400 italic text-[11px]">
+                          No items added yet. Click "+ Add Item" above to add item rows.
+                        </td>
+                      </tr>
+                    ) : (
+                      items.map((item, index) => {
                       const discountedRate = item.rate * (1 - masterDiscountPercent / 100);
                       const finalAmount = item.qty * discountedRate;
 
@@ -926,14 +919,40 @@ export default function QuotationBuilder({
                           </td>
                         </tr>
                       );
-                    })}
+                    })
+                  )}
                   </tbody>
                 </table>
               </div>
             ) : (
               /* If Group-Wise Type Style */
               <div className="space-y-4">
-                {groups.map((groupName, gIdx) => {
+                {groups.length === 0 ? (
+                  <div className="border border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50/25">
+                    <p className="text-slate-500 font-extrabold text-[12px] mb-1.5 font-display">No Furniture Blocks Created Yet</p>
+                    <p className="text-slate-400 text-[10px] mb-4 max-w-[280px] mx-auto leading-normal font-medium">
+                      Group-Wise quotations organize your furniture list into floors, rooms, or categories. Add a block to begin.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const name = prompt("Enter new block name (e.g. Living Room, Bedroom):");
+                        if (name && name.trim()) {
+                          const trimmed = name.trim();
+                          if (groups.includes(trimmed)) {
+                            alert("Block already exists.");
+                          } else {
+                            setGroups([...groups, trimmed]);
+                          }
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[10px] uppercase tracking-wide px-4 py-1.5 rounded-lg cursor-pointer transition shadow-sm"
+                    >
+                      + Add Your First Block
+                    </button>
+                  </div>
+                ) : (
+                  groups.map((groupName, gIdx) => {
                   const groupedItems = items.filter(it => it.groupName === groupName);
 
                   return (
@@ -998,21 +1017,26 @@ export default function QuotationBuilder({
                                 return (
                                   <tr 
                                     key={item.id} 
-                                    draggable={true}
-                                    onDragStart={() => {
-                                      setDraggingId(item.id);
-                                    }}
-                                    onDragEnd={() => {
-                                      setDraggingId(null);
-                                    }}
                                     className={`hover:bg-slate-50/40 text-[11px] transition-colors focus-within:bg-slate-50/20 ${
-                                      draggingId === item.id ? 'opacity-40 bg-blue-50/30 cursor-grabbing' : 'cursor-grab'
+                                      draggingId === item.id ? 'opacity-40 bg-blue-50/30' : ''
                                     }`}
                                   >
                                     {/* Continuous global numbering + Drag handle as requested */}
                                     <td className="py-1 px-2 text-center font-mono text-slate-400 font-semibold select-none">
-                                      <div className="flex items-center justify-center gap-1">
-                                        <GripVertical className="w-3.5 h-3.5 text-slate-350 cursor-grab active:cursor-grabbing hover:text-slate-500" />
+                                      <div className="flex items-center justify-center gap-1.5">
+                                        <div
+                                          draggable={true}
+                                          onDragStart={() => {
+                                            setDraggingId(item.id);
+                                          }}
+                                          onDragEnd={() => {
+                                            setDraggingId(null);
+                                          }}
+                                          className="p-1 cursor-grab active:cursor-grabbing hover:text-slate-650 rounded hover:bg-slate-100 transition inline-flex items-center"
+                                          title="Drag handle to re-group item block"
+                                        >
+                                          <GripVertical className="w-3.5 h-3.5 text-slate-400" />
+                                        </div>
                                         <span>{primeIndex + 1}</span>
                                       </div>
                                     </td>
@@ -1146,7 +1170,8 @@ export default function QuotationBuilder({
                       )}
                     </div>
                   );
-                })}
+                })
+              )}
               </div>
             )}
           </div>
@@ -1329,7 +1354,9 @@ export default function QuotationBuilder({
                           className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                         />
                         <div className="flex-1">
-                          <span className="text-slate-800 font-extrabold font-sans text-[10.5px] block">{b.accountNo}</span>
+                          <span className="text-slate-800 font-extrabold font-sans text-[10.5px] block">
+                            {b.bankName ? `${b.bankName} - ` : ''}{b.accountNo}
+                          </span>
                           <span className="text-slate-500 text-[9px] block font-mono font-bold">
                             {b.bankBranch} ({b.accountType || 'Current'})
                           </span>
