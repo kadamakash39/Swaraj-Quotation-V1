@@ -345,9 +345,12 @@ function paginateQuotation(
 export default function A4Preview({
   quotation,
   customers,
-  companyProfile,
+  companyProfile: propCompanyProfile,
   onBack
 }: A4PreviewProps) {
+
+  // Auto-adapt snapshotted company configuration if present to freeze history perfectly!
+  const companyProfile = quotation.companySnapshot || propCompanyProfile;
 
   const [shareType, setShareType] = useState<'Email' | 'WhatsApp' | null>(null);
   const [recipient, setRecipient] = useState('');
@@ -368,11 +371,12 @@ export default function A4Preview({
 
   const totalDiscount = grossSubtotal - taxableValue;
   
+  const includeGst = quotation.includeGst !== false;
   const isLocal = !matchedCustomer || matchedCustomer.state === 'Maharashtra';
-  const cgstAmount = isLocal ? taxableValue * 0.09 : 0;
-  const sgstAmount = isLocal ? taxableValue * 0.09 : 0;
-  const igstAmount = !isLocal ? taxableValue * 0.18 : 0;
-  const totalGstAmount = isLocal ? (cgstAmount + sgstAmount) : igstAmount;
+  const cgstAmount = isLocal && includeGst ? taxableValue * 0.09 : 0;
+  const sgstAmount = isLocal && includeGst ? taxableValue * 0.09 : 0;
+  const igstAmount = !isLocal && includeGst ? taxableValue * 0.18 : 0;
+  const totalGstAmount = includeGst ? (isLocal ? (cgstAmount + sgstAmount) : igstAmount) : 0;
   const grandTotal = taxableValue + totalGstAmount;
 
   // Render continuous Terms numbering properly
@@ -396,7 +400,16 @@ export default function A4Preview({
 
   // Trigger web system printing
   const triggerPrint = () => {
+    const originalTitle = document.title;
+    const clientNameCleaned = matchedCustomer?.name ? matchedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Client';
+    const quoteNoCleaned = quotation.id ? quotation.id.replace(/[^a-zA-Z0-9]/g, '_') : 'Quote';
+    document.title = `${clientNameCleaned}_Quotation_No_${quoteNoCleaned}`;
+    
     window.print();
+    
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 1000);
   };
 
   // Open share dialogue logic
@@ -588,7 +601,7 @@ export default function A4Preview({
                         />
                       )}
                       <div className="text-left font-sans">
-                        <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-1.5 text-left uppercase">
+                        <h1 className="text-xl font-black tracking-tight text-slate-900 leading-none mb-1.5 text-left uppercase">
                           {companyProfile.name}
                         </h1>
                         <p className="text-[10px] text-slate-600 max-w-[360px] leading-snug text-left font-bold">{companyProfile.address}</p>
@@ -622,7 +635,7 @@ export default function A4Preview({
                           <p className="text-slate-655 font-bold text-left">{matchedCustomer.city}, {matchedCustomer.state} - {matchedCustomer.pincode}</p>
                         )}
                         <p className="text-slate-500 font-bold mt-0.5 text-[9.5px] text-left">
-                          GST: {matchedCustomer?.gstin || '[Client GST]'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
+                          GST: {matchedCustomer?.gstin?.trim() ? matchedCustomer.gstin.trim() : 'Unregistered'} {matchedCustomer?.mobile ? `| Mob: ${matchedCustomer.mobile}` : ''}
                         </p>
                       </div>
 
@@ -777,28 +790,36 @@ export default function A4Preview({
                         {/* Left Column: Bank details */}
                         <div>
                           {quotation.bankDetails.showInQuotation ? (
-                            <div className="border border-slate-300 rounded-xl p-3 bg-white shadow-3xs text-left space-y-1">
-                              <p className="font-bold text-[#1E3A8A] uppercase tracking-wider text-[8.5px] pb-1 border-b border-slate-200">
-                                BANK TRANSFER DETAILS:
-                              </p>
-                              <ul className="text-[9px] text-slate-700 font-bold space-y-0.5 font-sans">
-                                <li className="flex items-start gap-1">
-                                  <span className="text-slate-400 select-none shrink-0">•</span>
-                                  <span><strong className="text-slate-600 font-semibold font-medium">Account Name:</strong> {quotation.bankDetails.accountName || companyProfile.name}</span>
-                                </li>
-                                <li className="flex items-start gap-1">
-                                  <span className="text-slate-400 select-none shrink-0">•</span>
-                                  <span><strong className="text-slate-600 font-semibold font-medium">Account No:</strong> <span className="font-mono text-slate-950 font-bold">{quotation.bankDetails.accountNo}</span></span>
-                                </li>
-                                <li className="flex items-start gap-1">
-                                  <span className="text-slate-400 select-none shrink-0">•</span>
-                                  <span><strong className="text-slate-600 font-semibold font-medium">IFSC Code:</strong> <span className="font-mono text-slate-950 font-bold">{quotation.bankDetails.ifsc}</span></span>
-                                </li>
-                                <li className="flex items-start gap-1">
-                                  <span className="text-slate-400 select-none shrink-0">•</span>
-                                  <span><strong className="text-slate-600 font-semibold font-medium">Bank & Branch:</strong> {quotation.bankDetails.bankBranch}</span>
-                                </li>
-                              </ul>
+                            <div className="space-y-2 max-h-[160px] overflow-hidden">
+                              {(quotation.banksSnapshot && Array.isArray(quotation.banksSnapshot) && quotation.banksSnapshot.length > 0
+                                ? quotation.banksSnapshot
+                                : [quotation.bankDetails]
+                              ).map((bankAcc, bIdx) => (
+                                <div key={bIdx} className="border border-slate-300 rounded-xl p-2.5 bg-white shadow-3xs text-left space-y-0.5">
+                                  <p className="font-extrabold text-[#1E3A8A] uppercase tracking-wider text-[8px] pb-0.5 border-b border-slate-200 leading-none">
+                                    BANK DETAILS {quotation.banksSnapshot && quotation.banksSnapshot.length > 1 ? `#${bIdx + 1}` : ''}
+                                    {bankAcc.accountType ? ` (${bankAcc.accountType})` : ''}:
+                                  </p>
+                                  <ul className="text-[8.5px] text-slate-700 font-bold space-y-px font-sans leading-tight">
+                                    <li className="flex items-start gap-1">
+                                      <span className="text-slate-400 select-none shrink-0">•</span>
+                                      <span><strong className="text-slate-600 font-semibold font-medium">Holder:</strong> {bankAcc.accountName || companyProfile.name}</span>
+                                    </li>
+                                    <li className="flex items-start gap-1">
+                                      <span className="text-slate-400 select-none shrink-0">•</span>
+                                      <span><strong className="text-slate-600 font-semibold font-medium">A/C No:</strong> <span className="font-mono text-slate-950 font-extrabold">{bankAcc.accountNo}</span></span>
+                                    </li>
+                                    <li className="flex items-start gap-1">
+                                      <span className="text-slate-400 select-none shrink-0">•</span>
+                                      <span><strong className="text-slate-600 font-semibold font-medium">IFSC:</strong> <span className="font-mono text-slate-950 font-extrabold">{bankAcc.ifsc}</span></span>
+                                    </li>
+                                    <li className="flex items-start gap-1">
+                                      <span className="text-slate-400 select-none shrink-0">•</span>
+                                      <span><strong className="text-slate-600 font-semibold font-medium">Branch:</strong> {bankAcc.bankBranch}</span>
+                                    </li>
+                                  </ul>
+                                </div>
+                              ))}
                             </div>
                           ) : (
                             <div className="text-slate-400 italic text-[9px] text-left pt-2">
@@ -824,23 +845,25 @@ export default function A4Preview({
                               <span className="font-extrabold text-slate-900">₹{taxableValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
 
-                            {isLocal ? (
-                              <>
+                            {includeGst ? (
+                              isLocal ? (
+                                <>
+                                  <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
+                                    <span>CGST 9%:</span>
+                                    <span className="font-semibold text-slate-800">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
+                                    <span>SGST 9%:</span>
+                                    <span className="font-semibold text-slate-800">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                </>
+                              ) : (
                                 <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
-                                  <span>CGST 9%:</span>
-                                  <span className="font-semibold text-slate-800">₹{cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
-                                  <span>SGST 9%:</span>
-                                  <span className="font-semibold text-slate-800">₹{sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="flex justify-between border-b border-slate-100 py-[2px] text-slate-600">
                                   <span>IGST 18%:</span>
                                   <span className="font-semibold text-slate-800">₹{igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
-                            )}
+                              )
+                            ) : null}
 
                             <div className="flex justify-between border-t border-slate-400 pt-[3px] font-black text-[10.5px] text-[#1E3A8A] uppercase tracking-wider">
                               <span>GRAND TOTAL:</span>

@@ -143,6 +143,22 @@ export default function App() {
     getLocalStorageItem<BankDetails>('fqmp_bank', DEFAULT_BANK_DETAILS)
   );
 
+  const [banks, setBanks] = useState<BankDetails[]>(() => {
+    const loaded = localStorage.getItem('fqmp_banks');
+    if (loaded) {
+      try {
+        const parsed = JSON.parse(loaded);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error("Failed parsing fqmp_banks", e);
+      }
+    }
+    const legBank = getLocalStorageItem<BankDetails>('fqmp_bank', DEFAULT_BANK_DETAILS);
+    return [{ ...legBank, id: 'bank-1', accountType: 'Current', showInQuotation: true }];
+  });
+
   const [terms, setTerms] = useState<TermCondition[]>(() => 
     getLocalStorageItem<TermCondition[]>('fqmp_terms', DEFAULT_TERMS)
   );
@@ -213,6 +229,10 @@ export default function App() {
   }, [bank]);
 
   useEffect(() => {
+    localStorage.setItem('fqmp_banks', JSON.stringify(banks));
+  }, [banks]);
+
+  useEffect(() => {
     localStorage.setItem('fqmp_terms', JSON.stringify(terms));
   }, [terms]);
 
@@ -244,11 +264,18 @@ export default function App() {
   const handleSaveQuotation = (q: Quotation) => {
     const exists = quotations.some(item => item.id === q.id);
     let updated: Quotation[];
+    
+    // Auto-attach company snapshot to ensure editing/saving preserves company-info frozen snapshot
+    const qWithSnapshot: Quotation = {
+      ...q,
+      companySnapshot: q.companySnapshot || { ...company }
+    };
+
     if (exists) {
-      updated = quotations.map(item => item.id === q.id ? q : item);
+      updated = quotations.map(item => item.id === q.id ? qWithSnapshot : item);
       appendAuditLog('UPDATE_QUOTATION', `Updated quotation details for ${q.id}.`);
     } else {
-      updated = [q, ...quotations];
+      updated = [qWithSnapshot, ...quotations];
       appendAuditLog('CREATE_QUOTATION', `Created and published quotation ${q.id}.`);
     }
     setQuotations(updated);
@@ -490,6 +517,7 @@ export default function App() {
               masterSpecs={specs}
               masterTerms={terms}
               masterBank={bank}
+              masterBanks={banks}
               operatorName={currentUser?.username}
               onAddCustomer={(newCust) => {
                 setCustomers([newCust, ...customers]);
@@ -728,9 +756,11 @@ export default function App() {
                   companyProfile={company}
                   materialSpecs={specs}
                   bankDetails={bank}
+                  banks={banks}
                   onUpdateCompany={handleUpdateCompany}
                   onUpdateSpecs={handleUpdateSpecs}
                   onUpdateBank={handleUpdateBank}
+                  onUpdateBanks={setBanks}
                   users={users}
                   onUpdateUsers={setUsers}
                   currentUserRole={role}

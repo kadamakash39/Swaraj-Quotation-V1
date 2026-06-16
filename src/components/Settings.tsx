@@ -10,9 +10,11 @@ interface SettingsProps {
   companyProfile: CompanyProfile;
   materialSpecs: MaterialSpecs;
   bankDetails: BankDetails;
+  banks: BankDetails[];
   onUpdateCompany: (comp: CompanyProfile) => void;
   onUpdateSpecs: (spec: MaterialSpecs) => void;
   onUpdateBank: (bank: BankDetails) => void;
+  onUpdateBanks: (banks: BankDetails[]) => void;
   users: ERPUser[];
   onUpdateUsers: (updated: ERPUser[]) => void;
   currentUserRole: UserRole;
@@ -24,9 +26,11 @@ export default function Settings({
   companyProfile,
   materialSpecs,
   bankDetails,
+  banks,
   onUpdateCompany,
   onUpdateSpecs,
   onUpdateBank,
+  onUpdateBanks,
   users,
   onUpdateUsers,
   currentUserRole,
@@ -39,7 +43,9 @@ export default function Settings({
   const [specs, setSpecs] = useState<MaterialSpecs>(() => {
     return Array.isArray(materialSpecs) ? materialSpecs.map(s => ({ ...s })) : [];
   });
-  const [bank, setBank] = useState<BankDetails>({ ...bankDetails });
+  const [localBanks, setLocalBanks] = useState<BankDetails[]>(() => {
+    return Array.isArray(banks) && banks.length > 0 ? banks.map(b => ({ ...b })) : [{ ...bankDetails, id: 'bank-1', accountType: 'Current', showInQuotation: true }];
+  });
   const [terms, setTerms] = useState<TermCondition[]>(() => {
     return Array.isArray(masterTerms) ? masterTerms.map(t => ({ ...t })) : [];
   });
@@ -57,9 +63,12 @@ export default function Settings({
     e.preventDefault();
     onUpdateCompany(profile);
     onUpdateSpecs(specs);
-    onUpdateBank(bank);
+    if (localBanks.length > 0) {
+      onUpdateBank(localBanks[0]);
+    }
+    onUpdateBanks(localBanks);
     onUpdateTerms(terms);
-    alert("Company profile, manufacturing material, and terms & conditions defaults updated successfully!");
+    alert("Company profile, manufacturing materials, bank accounts, and terms updated successfully!");
   };
 
   const handleAddUser = (e: any) => {
@@ -381,56 +390,133 @@ export default function Settings({
           
           {/* Card 3: Bank Account */}
           <div className="bg-white rounded border border-slate-200 p-4 shadow-2xs space-y-3">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-display flex items-center gap-2 border-b border-slate-100 pb-1.5">
-              <Landmark className="w-4 h-4 text-slate-500" />
-              Corporate Banking Accounts
-            </h3>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-800 font-display flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-slate-500" />
+                Corporate Banking Accounts
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  const newBank: BankDetails = {
+                    id: 'bank-' + Date.now() + '-' + Math.floor(Math.random() * 100),
+                    accountName: profile.name || 'Swaraj Furniture Pvt Ltd',
+                    accountNo: '',
+                    ifsc: '',
+                    bankBranch: '',
+                    accountType: 'Current',
+                    showInQuotation: true
+                  };
+                  setLocalBanks([...localBanks, newBank]);
+                }}
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 rounded px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1 transition cursor-pointer select-none"
+              >
+                + Add Account
+              </button>
+            </div>
 
-            <div className="space-y-2.5 text-xs font-medium">
-              <div className="space-y-0.5">
-                <label className="text-[9px] text-slate-400 uppercase font-bold">Account Holder Name</label>
-                <input
-                  type="text"
-                  required
-                  value={bank.accountName}
-                  onChange={(e) => setBank({ ...bank, accountName: e.target.value })}
-                  className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 text-xs"
-                />
-              </div>
+            <div className="space-y-4 max-h-[310px] overflow-y-auto pr-1">
+              {localBanks.map((item, bIdx) => (
+                <div key={item.id || bIdx} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2 relative shadow-3xs">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-1 mb-1">
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Account #{bIdx + 1}</span>
+                    {localBanks.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLocalBanks(localBanks.filter((_, idx) => idx !== bIdx));
+                        }}
+                        className="text-rose-500 hover:text-rose-700 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                      >
+                        ✕ Remove
+                      </button>
+                    )}
+                  </div>
 
-              <div className="space-y-0.5">
-                <label className="text-[9px] text-slate-400 uppercase font-bold">Account Number</label>
-                <input
-                  type="text"
-                  required
-                  value={bank.accountNo}
-                  onChange={(e) => setBank({ ...bank, accountNo: e.target.value })}
-                  className="w-full border border-slate-200 rounded p-1.5 focus:outline-none bg-slate-50/30 font-mono text-slate-900 text-xs"
-                />
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium">
+                    <div className="space-y-0.5 col-span-1 sm:col-span-2">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Holder Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={item.accountName}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].accountName = e.target.value;
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white"
+                      />
+                    </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-0.5">
-                  <label className="text-[9px] text-slate-400 uppercase font-bold">Bank IFSC Code</label>
-                  <input
-                    type="text"
-                    required
-                    value={bank.ifsc}
-                    onChange={(e) => setBank({ ...bank, ifsc: e.target.value.toUpperCase() })}
-                    className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 font-mono text-xs uppercase"
-                  />
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Account Number</label>
+                      <input
+                        type="text"
+                        required
+                        value={item.accountNo}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].accountNo = e.target.value;
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white font-mono text-slate-900"
+                      />
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">IFSC Code</label>
+                      <input
+                        type="text"
+                        required
+                        value={item.ifsc}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].ifsc = e.target.value.toUpperCase();
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white font-mono text-slate-900 uppercase"
+                      />
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Account Type</label>
+                      <select
+                        value={item.accountType || 'Current'}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].accountType = e.target.value;
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white font-bold text-[11px]"
+                      >
+                        <option value="Current">Current</option>
+                        <option value="Savings">Savings</option>
+                        <option value="CC Account">CC Account</option>
+                        <option value="OD Account">OD Account</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-slate-400 uppercase font-bold">Branch</label>
+                      <input
+                        type="text"
+                        required
+                        value={item.bankBranch}
+                        onChange={(e) => {
+                          const updated = [...localBanks];
+                          updated[bIdx].bankBranch = e.target.value;
+                          setLocalBanks(updated);
+                        }}
+                        className="w-full border border-slate-200 rounded p-1 focus:outline-none focus:border-blue-500 bg-white"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-0.5">
-                  <label className="text-[9px] text-slate-400 uppercase font-bold">Branch Location</label>
-                  <input
-                    type="text"
-                    required
-                    value={bank.bankBranch}
-                    onChange={(e) => setBank({ ...bank, bankBranch: e.target.value })}
-                    className="w-full border border-slate-200 rounded p-1.5 focus:outline-none focus:border-blue-500 bg-slate-50/30 text-xs"
-                  />
-                </div>
-              </div>
+              ))}
+              {localBanks.length === 0 && (
+                <p className="text-2xs text-slate-400 italic text-center py-4">No bank accounts configured. Click "+ Add Account" above.</p>
+              )}
             </div>
           </div>
 

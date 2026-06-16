@@ -61,11 +61,13 @@ export interface MaterialSpecItem {
 export type MaterialSpecs = MaterialSpecItem[];
 
 export interface BankDetails {
+  id?: string;
   accountName: string;
   accountNo: string;
   ifsc: string;
   bankBranch: string;
   showInQuotation: boolean;
+  accountType?: string; // e.g. 'Current', 'Savings' etc.
 }
 
 export interface Quotation {
@@ -85,6 +87,11 @@ export interface Quotation {
   terms: TermCondition[];
   bankDetails: BankDetails;
   notes?: string;
+  
+  // Custom snapshots to freeze state for older quotations
+  companySnapshot?: CompanyProfile;
+  banksSnapshot?: BankDetails[];
+  includeGst?: boolean; // Option to select quotation with No GST
 }
 
 export interface AuditLog {

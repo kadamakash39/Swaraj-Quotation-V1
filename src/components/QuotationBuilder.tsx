@@ -17,6 +17,7 @@ interface QuotationBuilderProps {
   masterSpecs: MaterialSpecs;
   masterTerms: TermCondition[];
   masterBank: BankDetails;
+  masterBanks?: BankDetails[];
   operatorName?: string;
   onAddCustomer?: (cust: Customer) => void;
 }
@@ -30,6 +31,7 @@ export default function QuotationBuilder({
   masterSpecs,
   masterTerms,
   masterBank,
+  masterBanks = [],
   operatorName,
   onAddCustomer
 }: QuotationBuilderProps) {
@@ -108,11 +110,38 @@ export default function QuotationBuilder({
   const [terms, setTerms] = useState<TermCondition[]>(initialQuotationToEdit?.terms || masterTerms.map(t => ({ ...t })));
   const [bankDetails, setBankDetails] = useState<BankDetails>(initialQuotationToEdit?.bankDetails || { ...masterBank });
 
+  const [selectedBanks, setSelectedBanks] = useState<BankDetails[]>(() => {
+    if (initialQuotationToEdit?.banksSnapshot && Array.isArray(initialQuotationToEdit.banksSnapshot)) {
+      return initialQuotationToEdit.banksSnapshot.map(b => ({ ...b }));
+    }
+    if (initialQuotationToEdit?.bankDetails) {
+      return [{ ...initialQuotationToEdit.bankDetails }];
+    }
+    const pool = masterBanks && masterBanks.length > 0 ? masterBanks : [masterBank];
+    return pool.filter(b => b.showInQuotation).map(b => ({ ...b }));
+  });
+
+  const [includeGst, setIncludeGst] = useState<boolean>(() => {
+    if (initialQuotationToEdit && typeof initialQuotationToEdit.includeGst !== 'undefined') {
+      return initialQuotationToEdit.includeGst;
+    }
+    return true;
+  });
+
   // Drag and drop state for group re-assignment
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
   // Custom Groups List (For group wise selections)
-  const [groups, setGroups] = useState<string[]>(['Bedroom Furniture', 'Living Room Furniture', 'Modular Kitchen']);
+  const [groups, setGroups] = useState<string[]>(() => {
+    if (initialQuotationToEdit?.items) {
+      const activeGroups = initialQuotationToEdit.items
+        .map(it => it.groupName)
+        .filter((g): g is string => !!g);
+      const uniqueGroups = Array.from(new Set(activeGroups));
+      if (uniqueGroups.length > 0) return uniqueGroups;
+    }
+    return ['Bedroom Furniture', 'Living Room Furniture', 'Modular Kitchen'];
+  });
   const [newGroupName, setNewGroupName] = useState('');
 
   // AI Assistant Panel State
@@ -151,7 +180,7 @@ export default function QuotationBuilder({
 
   const subtotal = calculateSubtotal();
   const isMaharashtra = selectedCustomer?.state === 'Maharashtra';
-  const gstRate = 0.18;
+  const gstRate = includeGst ? 0.18 : 0;
   const totalGstAmount = subtotal * gstRate;
   const grandTotal = subtotal + totalGstAmount;
 
@@ -256,7 +285,9 @@ export default function QuotationBuilder({
       createdBy: initialQuotationToEdit?.createdBy || operatorName || 'Admin',
       materialSpecs: specs,
       terms: terms,
-      bankDetails,
+      bankDetails: selectedBanks.length > 0 ? selectedBanks[0] : bankDetails,
+      banksSnapshot: selectedBanks,
+      includeGst,
       notes
     });
   };
@@ -1263,7 +1294,13 @@ export default function QuotationBuilder({
                   <input
                     type="checkbox"
                     checked={bankDetails.showInQuotation}
-                    onChange={(e) => setBankDetails({ ...bankDetails, showInQuotation: e.target.checked })}
+                    onChange={(e) => {
+                      setBankDetails({ ...bankDetails, showInQuotation: e.target.checked });
+                      if (e.target.checked && selectedBanks.length === 0) {
+                        const pool = masterBanks && masterBanks.length > 0 ? masterBanks : [masterBank];
+                        setSelectedBanks([pool[0]]);
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-650"></div>
@@ -1271,28 +1308,66 @@ export default function QuotationBuilder({
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-slate-600 bg-slate-50/50 rounded border border-slate-100 p-2 font-mono">
-                <div>
-                  <span className="text-slate-400 block uppercase font-bold text-[8px]">holder</span>
-                  {bankDetails.accountName}
+              {bankDetails.showInQuotation && (
+                <div className="space-y-2 max-h-[160px] overflow-y-auto border border-slate-200 rounded p-2 bg-slate-50">
+                  <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mb-1">Choose active corporate accounts:</span>
+                  {(masterBanks && masterBanks.length > 0 ? masterBanks : [masterBank]).map((b, idx) => {
+                    const uniqueId = b.id || `bank-id-${idx}`;
+                    const isSelected = selectedBanks.some(sb => sb.id === uniqueId || sb.accountNo === b.accountNo);
+                    return (
+                      <label key={uniqueId} className="flex items-center gap-2.5 p-2 bg-white border border-slate-200 rounded-lg text-2xs font-bold cursor-pointer hover:bg-blue-50/10 transition">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedBanks([...selectedBanks, b]);
+                            } else {
+                              setSelectedBanks(selectedBanks.filter(sb => sb.id !== uniqueId && sb.accountNo !== b.accountNo));
+                            }
+                          }}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                        />
+                        <div className="flex-1">
+                          <span className="text-slate-800 font-extrabold font-sans text-[10.5px] block">{b.accountNo}</span>
+                          <span className="text-slate-500 text-[9px] block font-mono font-bold">
+                            {b.bankBranch} ({b.accountType || 'Current'})
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {selectedBanks.length === 0 && (
+                    <p className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-100 p-1.5 rounded">⚠️ Please select at least one corporate account to display on quotation.</p>
+                  )}
                 </div>
-                <div>
-                  <span className="text-slate-400 block uppercase font-bold text-[8px]">A/C No</span>
-                  {bankDetails.accountNo}
+              )}
+
+              {!bankDetails.showInQuotation && (
+                <div className="text-slate-455 italic text-[10px] py-1 bg-slate-50/50 p-2 rounded border border-slate-100">
+                  Bank details are excluded for this quotation.
                 </div>
-                <div>
-                  <span className="text-slate-400 block uppercase font-bold text-[8px]">IFSC</span>
-                  {bankDetails.ifsc}
-                </div>
-                <div>
-                  <span className="text-slate-400 block uppercase font-bold text-[8px]">Branch</span>
-                  {bankDetails.bankBranch}
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="space-y-2.5">
-              <h4 className="font-bold font-display text-2xs uppercase tracking-wider text-slate-800 border-b border-slate-100 pb-1.5">Executive & Status Settings</h4>
+              <h4 className="font-bold font-display text-2xs uppercase tracking-wider text-slate-800 border-b border-slate-100 pb-1.5">GST Calculations</h4>
+              <div className="grid grid-cols-1 gap-2">
+                <div className="flex items-center justify-between p-1.5 bg-slate-50 rounded border border-slate-200">
+                  <span className="text-[10px] font-extrabold text-slate-700">Calculate & Include 18% GST</span>
+                  <label className="relative inline-flex items-center cursor-pointer scale-85">
+                    <input
+                      type="checkbox"
+                      checked={includeGst}
+                      onChange={(e) => setIncludeGst(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-650"></div>
+                  </label>
+                </div>
+              </div>
+
+              <h4 className="font-bold font-display text-2xs uppercase tracking-wider text-slate-800 border-b border-slate-100 pb-1.5 mt-2">Executive & Status Settings</h4>
               <div className="grid grid-cols-1 gap-2">
                 <div className="space-y-0.5">
                   <label className="text-[8px] font-bold text-slate-400 uppercase">Quotation Status</label>
