@@ -1,9 +1,10 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, useRef } from 'react';
 import { 
   Printer, ArrowLeft, Mail, Phone, ExternalLink, Calendar, 
-  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode 
+  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode, Download 
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
+import html2pdf from 'html2pdf.js';
 
 // Convert numbers into Words in standard Indian Rupees / Paise formatting
 export function convertNumberToWords(num: number): string {
@@ -489,18 +490,75 @@ export default function A4Preview({
   // Paginate pages dynamically
   const pages = paginateQuotation(quotation, companyProfile, activeTerms, activeSpecs, showImages, isLocal, includeGst);
 
-  // Trigger web system printing
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Generate PDF using html2pdf
+  const generatePDF = async () => {
+    if (!canvasRef.current) {
+      alert('PDF generation failed. Please try again.');
+      return;
+    }
+
+    const element = canvasRef.current;
+    const clientNameCleaned = matchedCustomer?.name ? matchedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Client';
+    const quoteNoCleaned = quotation.id ? quotation.id.replace(/[^a-zA-Z0-9]/g, '_') : 'Quote';
+    const fileName = `${clientNameCleaned}_Quotation_${quoteNoCleaned}.pdf`;
+
+    const opt = {
+      margin: 0,
+      filename: fileName,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+        allowTaint: true
+      },
+      jsPDF: {
+        unit: 'mm',
+        format: 'a4',
+        orientation: 'portrait'
+      },
+      pagebreak: {
+        mode: ['avoid-all', 'css', 'legacy'],
+        before: '.print-page-break',
+        after: '.print-page-after',
+        avoid: ['.no-page-break']
+      }
+    };
+
+    try {
+      html2pdf().set(opt).from(element).save();
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      alert('Failed to generate PDF. Please try again.');
+    }
+  };
+
+  // Trigger browser print dialog
   const triggerPrint = () => {
+    if (!canvasRef.current) return;
+    
     const originalTitle = document.title;
     const clientNameCleaned = matchedCustomer?.name ? matchedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Client';
     const quoteNoCleaned = quotation.id ? quotation.id.replace(/[^a-zA-Z0-9]/g, '_') : 'Quote';
     document.title = `${clientNameCleaned}_Quotation_No_${quoteNoCleaned}`;
-    
-    window.print();
-    
-    setTimeout(() => {
-      document.title = originalTitle;
-    }, 1000);
+
+    // Temporarily show all content
+    const allContent = document.getElementById('swraj-a4-pdf-canvas');
+    if (allContent) {
+      // Hide everything except the PDF content
+      document.body.style.overflow = 'hidden';
+      const originalDisplay = document.body.style.display;
+      
+      setTimeout(() => {
+        window.print();
+        document.title = originalTitle;
+        document.body.style.display = originalDisplay;
+        document.body.style.overflow = 'auto';
+      }, 100);
+    }
   };
 
   // Open share dialogue logic
@@ -547,6 +605,11 @@ export default function A4Preview({
       
       {/* Scope print inline overrides to force full background print graphics and clean sizing */}
       <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+        }
+        
         @media print {
           @page {
             size: A4 portrait;
@@ -557,7 +620,7 @@ export default function A4Preview({
             padding: 0 !important;
             float: none !important;
             width: 210mm !important;
-            height: 297mm !important;
+            min-height: 297mm !important;
             background: #ffffff !important;
             color: #000000 !important;
             overflow: visible !important;
@@ -565,6 +628,7 @@ export default function A4Preview({
           #root {
             padding: 0 !important;
             margin: 0 !important;
+            width: 100%;
           }
           .no-print {
             display: none !important;
@@ -582,9 +646,7 @@ export default function A4Preview({
             width: 210mm !important;
             height: 297mm !important;
             min-height: 297mm !important;
-            max-height: 297mm !important;
             page-break-after: always !important;
-            page-break-before: auto !important;
             page-break-inside: avoid !important;
             box-sizing: border-box !important;
             margin: 0 !important;
@@ -598,6 +660,10 @@ export default function A4Preview({
             position: relative !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            break-inside: avoid;
+          }
+          .print-page:last-child {
+            page-break-after: auto;
           }
           #swraj-a4-pdf-canvas .print-page img {
             max-height: 165px !important;
@@ -608,6 +674,26 @@ export default function A4Preview({
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            page-break-inside: avoid;
+          }
+          tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+        }
+
+        /* Screen display styles */
+        #swraj-a4-pdf-canvas {
+          display: block;
+        }
+        
+        #swraj-a4-pdf-canvas .print-page {
+          margin-bottom: 24px;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
       `}</style>
       
@@ -629,16 +715,26 @@ export default function A4Preview({
 
         <div className="flex flex-wrap gap-2.5">
           <button
+            onClick={generatePDF}
+            className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors relative z-50"
+            title="Download quotation as PDF"
+          >
+            <Download className="w-4 h-4" />
+            Download PDF
+          </button>
+
+          <button
             onClick={triggerPrint}
-            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
+            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors relative z-50"
+            title="Print or save as PDF using print dialog"
           >
             <Printer className="w-4 h-4" />
-            Print / Save A4 PDF
+            Print A4
           </button>
 
           <button
             onClick={() => handleOpenShare('WhatsApp')}
-            className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer relative z-50"
           >
             <Share2 className="w-4 h-4" />
             WhatsApp PDF
@@ -646,7 +742,7 @@ export default function A4Preview({
 
           <button
             onClick={() => handleOpenShare('Email')}
-            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer"
+            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer relative z-50"
           >
             <Mail className="w-4 h-4" />
             Email PDF
@@ -662,6 +758,7 @@ export default function A4Preview({
           
           {/* Printable Page Canvas wrapping multiple pagination containers */}
           <div 
+            ref={canvasRef}
             id="swraj-a4-pdf-canvas"
             className="space-y-6 print:space-y-0"
           >
