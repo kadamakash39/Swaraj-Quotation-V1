@@ -1,9 +1,10 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, useRef } from 'react';
 import { 
   Printer, ArrowLeft, Mail, Phone, ExternalLink, Calendar, 
-  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode 
+  MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode, Download
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
+import html2pdf from 'html2pdf.js';
 
 // Convert numbers into Words in standard Indian Rupees / Paise formatting
 export function convertNumberToWords(num: number): string {
@@ -440,6 +441,9 @@ export default function A4Preview({
   onBack
 }: A4PreviewProps) {
 
+  // Reference to the PDF canvas for download
+  const pdfCanvasRef = useRef<HTMLDivElement>(null);
+
   // Auto-adapt snapshotted company configuration if present to freeze history perfectly!
   const companyProfile = quotation.companySnapshot || propCompanyProfile;
 
@@ -501,6 +505,32 @@ export default function A4Preview({
     setTimeout(() => {
       document.title = originalTitle;
     }, 1000);
+  };
+
+  // Download PDF directly to file
+  const downloadPDF = async () => {
+    if (!pdfCanvasRef.current) return;
+    
+    try {
+      const element = pdfCanvasRef.current;
+      const clientNameCleaned = matchedCustomer?.name ? matchedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Client';
+      const quoteNoCleaned = quotation.id ? quotation.id.replace(/[^a-zA-Z0-9]/g, '_') : 'Quote';
+      const filename = `${clientNameCleaned}_Quotation_${quoteNoCleaned}.pdf`;
+
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      };
+
+      html2pdf().set(opt).from(element).save();
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    }
   };
 
   // Open share dialogue logic
@@ -637,6 +667,14 @@ export default function A4Preview({
           </button>
 
           <button
+            onClick={downloadPDF}
+            className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download PDF
+          </button>
+
+          <button
             onClick={() => handleOpenShare('WhatsApp')}
             className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-500 font-bold text-xs text-white py-2 px-4 rounded-xl cursor-pointer"
           >
@@ -662,6 +700,7 @@ export default function A4Preview({
           
           {/* Printable Page Canvas wrapping multiple pagination containers */}
           <div 
+            ref={pdfCanvasRef}
             id="swraj-a4-pdf-canvas"
             className="space-y-6 print:space-y-0"
           >
