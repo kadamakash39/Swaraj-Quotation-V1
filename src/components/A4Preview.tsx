@@ -1,9 +1,10 @@
 import React, { useState, FormEvent } from 'react';
 import { 
-  Printer, ArrowLeft, Mail, Phone, ExternalLink, Calendar, 
+  Download, ArrowLeft, Mail, Phone, ExternalLink, Calendar, 
   MapPin, CheckSquare, Plus, FileText, Send, Share2, ShieldCheck, SquareCode 
 } from 'lucide-react';
 import { Quotation, Customer, CompanyProfile } from '../types';
+import html2pdf from 'html2pdf.js';
 
 // Convert numbers into Words in standard Indian Rupees / Paise formatting
 export function convertNumberToWords(num: number): string {
@@ -489,18 +490,24 @@ export default function A4Preview({
   // Paginate pages dynamically
   const pages = paginateQuotation(quotation, companyProfile, activeTerms, activeSpecs, showImages, isLocal, includeGst);
 
-  // Trigger web system printing
-  const triggerPrint = () => {
-    const originalTitle = document.title;
+  // Trigger PDF download
+  const downloadPDF = () => {
+    const canvasElement = document.getElementById('swraj-a4-pdf-canvas');
+    if (!canvasElement) return;
+
     const clientNameCleaned = matchedCustomer?.name ? matchedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Client';
     const quoteNoCleaned = quotation.id ? quotation.id.replace(/[^a-zA-Z0-9]/g, '_') : 'Quote';
-    document.title = `${clientNameCleaned}_Quotation_No_${quoteNoCleaned}`;
-    
-    window.print();
-    
-    setTimeout(() => {
-      document.title = originalTitle;
-    }, 1000);
+    const fileName = `${clientNameCleaned}_Quotation_No_${quoteNoCleaned}.pdf`;
+
+    const opt = {
+      margin: 0,
+      filename: fileName,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(canvasElement).save();
   };
 
   // Open share dialogue logic
@@ -629,11 +636,11 @@ export default function A4Preview({
 
         <div className="flex flex-wrap gap-2.5">
           <button
-            onClick={triggerPrint}
+            onClick={downloadPDF}
             className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white py-2 px-4 rounded-xl shadow cursor-pointer transition-colors"
           >
-            <Printer className="w-4 h-4" />
-            Print / Save A4 PDF
+            <Download className="w-4 h-4" />
+            Download PDF
           </button>
 
           <button
