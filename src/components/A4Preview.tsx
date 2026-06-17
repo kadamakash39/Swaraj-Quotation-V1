@@ -565,21 +565,34 @@ export default function A4Preview({
             overflow: visible;
           }
 
-          /* Hide everything except the print canvas using visibility-isolation pattern */
-          body > * {
-            display: none;
+          /* Hide everything on the page using visibility (NOT display) so descendants can opt back in */
+          body * {
+            visibility: hidden !important;
           }
 
-          /* Reveal ONLY the A4 canvas container */
+          /* Re-show ONLY the A4 canvas and all of its descendants */
+          #swraj-a4-pdf-canvas,
+          #swraj-a4-pdf-canvas * {
+            visibility: visible !important;
+          }
+
+          /* Anchor the canvas to the top-left so it fills the printed page */
           #swraj-a4-pdf-canvas {
-            display: block !important;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            border: none;
-            box-shadow: none;
-            background: transparent;
-            overflow: visible;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+          }
+
+          /* Always hide UI chrome explicitly */
+          .no-print {
+            display: none !important;
           }
 
           /* Style individual print pages */
