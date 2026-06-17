@@ -545,68 +545,87 @@ export default function A4Preview({
   return (
     <div className="space-y-6">
       
-      {/* Scope print inline overrides to force full background print graphics and clean sizing */}
+      {/* Consolidated print CSS: Single authoritative stylesheet for A4 PDF output */}
       <style>{`
         @media print {
+          /* Define A4 page dimensions and margins once */
           @page {
             size: A4 portrait;
-            margin: 0 !important;
+            margin: 0;
           }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            float: none !important;
-            width: 210mm !important;
-            height: 297mm !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            overflow: visible !important;
+
+          /* Reset all layout containers to allow natural page flow */
+          html, body, #root {
+            background: #ffffff;
+            color: #000000;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: auto;
+            overflow: visible;
           }
-          #root {
-            padding: 0 !important;
-            margin: 0 !important;
+
+          /* Hide everything except the print canvas using visibility-isolation pattern */
+          body > * {
+            display: none;
           }
-          .no-print {
-            display: none !important;
-          }
+
+          /* Reveal ONLY the A4 canvas container */
           #swraj-a4-pdf-canvas {
-            border: none !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: 210mm !important;
-            background: transparent !important;
             display: block !important;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: none;
+            box-shadow: none;
+            background: transparent;
+            overflow: visible;
           }
+
+          /* Style individual print pages */
           .print-page {
-            width: 210mm !important;
-            height: 297mm !important;
-            min-height: 297mm !important;
-            max-height: 297mm !important;
-            page-break-after: always !important;
-            page-break-before: auto !important;
-            page-break-inside: avoid !important;
-            box-sizing: border-box !important;
-            margin: 0 !important;
-            padding: 12mm 15mm 12mm 15mm !important;
-            border: none !important;
-            box-shadow: none !important;
-            background: #ffffff !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: flex-start !important;
-            position: relative !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+            width: 210mm;
+            height: 297mm;
+            margin: 0;
+            padding: 12mm 15mm;
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            page-break-after: always;
+            page-break-inside: avoid;
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
-          #swraj-a4-pdf-canvas .print-page img {
-            max-height: 165px !important;
-            width: auto !important;
-            object-fit: contain !important;
+
+          /* Prevent trailing blank page on last page */
+          .print-page:last-child {
+            page-break-after: auto;
           }
-          .no-print-background {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+
+          /* Image constraints for clean A4 output */
+          .print-page img {
+            max-height: 165px;
+            width: auto;
+            object-fit: contain;
+          }
+
+          /* Force background colors and borders to print */
+          * {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          /* Ensure tables print with structure intact */
+          table {
+            page-break-inside: avoid;
+            width: 100%;
+            border-collapse: collapse;
+          }
+
+          thead {
+            display: table-header-group;
           }
         }
       `}</style>
@@ -670,7 +689,6 @@ export default function A4Preview({
                 key={page.pageNumber}
                 className="print-page w-[210mm] h-[297mm] min-h-[297mm] max-h-[297mm] mx-auto bg-white border border-slate-200 p-[12mm_15mm_12mm_15mm] font-sans shadow-lg text-slate-800 tracking-tight relative flex flex-col justify-start"
                 style={{
-                  pageBreakAfter: 'always',
                   marginBottom: pIdx === pages.length - 1 ? '0' : '24px',
                 }}
               >
