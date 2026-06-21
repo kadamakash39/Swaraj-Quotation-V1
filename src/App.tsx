@@ -15,6 +15,7 @@ import {
   DEFAULT_BANK_DETAILS, DEFAULT_TERMS, MOCK_CUSTOMERS, 
   MOCK_QUOTATIONS, MOCK_AUDIT_LOGS, INDIAN_STATES 
 } from './mockData';
+import { supabase } from './supabaseClient';
 
 // Subcomponents import
 import Dashboard from './components/Dashboard';
@@ -33,6 +34,8 @@ const INITIAL_USERS: ERPUser[] = [
   { id: 'u-5', username: 'Viewer', passwordHash: 'V@123', role: 'Viewer' },
   { id: 'u-6', username: 'Amar', passwordHash: 'Amar@$123', role: 'General Manager' }
 ];
+
+const APP_STATE_KEY = 'erp_snapshot';
 
 // Helper function to robustly load and merge state from localStorage
 function getLocalStorageItem<T>(key: string, defaultValue: T): T {
@@ -54,6 +57,7 @@ function getLocalStorageItem<T>(key: string, defaultValue: T): T {
 }
 
 export default function App() {
+  const [isSupabaseReady, setIsSupabaseReady] = useState(false);
   
   // Authenticated operator state
   const [users, setUsers] = useState<ERPUser[]>(() => 
@@ -202,6 +206,106 @@ export default function App() {
   // Search filter inside master Quotations Tab
   const [quoteSearch, setQuoteSearch] = useState('');
   const [quoteStateFilter, setQuoteStateFilter] = useState('All');
+
+  // Load the shared cloud snapshot once on startup.
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRemoteSnapshot = async () => {
+      if (!supabase) {
+        setIsSupabaseReady(true);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('app_state')
+          .select('value')
+          .eq('key', APP_STATE_KEY)
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Failed to load remote snapshot:', error);
+          return;
+        }
+
+        if (data?.value) {
+          const remoteSnapshot = data.value;
+          if (remoteSnapshot.company) setCompany(remoteSnapshot.company);
+          if (remoteSnapshot.specs) setSpecs(remoteSnapshot.specs);
+          if (remoteSnapshot.bank) setBank(remoteSnapshot.bank);
+          if (remoteSnapshot.banks) setBanks(remoteSnapshot.banks);
+          if (remoteSnapshot.terms) setTerms(remoteSnapshot.terms);
+          if (remoteSnapshot.customers) setCustomers(remoteSnapshot.customers);
+          if (remoteSnapshot.quotations) setQuotations(remoteSnapshot.quotations);
+          if (remoteSnapshot.auditLogs) setAuditLogs(remoteSnapshot.auditLogs);
+          if (remoteSnapshot.users) setUsers(remoteSnapshot.users);
+        }
+      } catch (err) {
+        console.error('Unexpected error loading remote snapshot:', err);
+      } finally {
+        if (isMounted) {
+          setIsSupabaseReady(true);
+        }
+      }
+    };
+
+    loadRemoteSnapshot();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync to Supabase (and also keep browser storage as a fallback).
+  useEffect(() => {
+    if (!isSupabaseReady) return;
+
+    const syncSnapshot = async () => {
+      const snapshot = {
+        company,
+        specs,
+        bank,
+        banks,
+        terms,
+        customers,
+        quotations,
+        auditLogs,
+        users
+      };
+
+      localStorage.setItem('fqmp_company', JSON.stringify(company));
+      localStorage.setItem('fqmp_users', JSON.stringify(users));
+      localStorage.setItem('fqmp_specs', JSON.stringify(specs));
+      localStorage.setItem('fqmp_bank', JSON.stringify(bank));
+      localStorage.setItem('fqmp_banks', JSON.stringify(banks));
+      localStorage.setItem('fqmp_terms', JSON.stringify(terms));
+      localStorage.setItem('fqmp_customers', JSON.stringify(customers));
+      localStorage.setItem('fqmp_quotations', JSON.stringify(quotations));
+      localStorage.setItem('fqmp_logs', JSON.stringify(auditLogs));
+
+      if (!supabase) return;
+
+      try {
+        const { error } = await supabase
+          .from('app_state')
+          .upsert(
+            { key: APP_STATE_KEY, value: snapshot },
+            { onConflict: 'key' }
+          );
+
+        if (error) {
+          console.error('Supabase sync error:', error);
+        }
+      } catch (err) {
+        console.error('Unexpected Supabase sync failure:', err);
+      }
+    };
+
+    syncSnapshot();
+  }, [isSupabaseReady, company, specs, bank, banks, terms, customers, quotations, auditLogs, users]);
 
   // Sync to LocalStorage on state modifications
   useEffect(() => {
